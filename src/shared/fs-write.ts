@@ -2,6 +2,17 @@ import { lstat, mkdir, readlink, rename, stat, writeFile } from "node:fs/promise
 import { randomUUID } from "node:crypto";
 import { dirname, join, parse, resolve, sep } from "node:path";
 
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  const code = error.code;
+  return typeof code === "string" ? code : undefined;
+}
+
+function createErrnoError(message: string, code: string): Error & { code: string } {
+  const error = new Error(message);
+  return Object.assign(error, { code });
+}
+
 export async function resolveMutationTargetPath(filePath: string): Promise<string> {
   const absolutePath = resolve(filePath);
   const { root } = parse(absolutePath);
@@ -26,10 +37,10 @@ export async function resolveMutationTargetPath(filePath: string): Promise<strin
       }
 
       if (visitedSymlinks.has(candidatePath)) {
-        const error = new Error(
+        const error = createErrnoError(
           `Too many symbolic links while resolving ${filePath}`,
-        ) as NodeJS.ErrnoException;
-        error.code = "ELOOP";
+          "ELOOP",
+        );
         throw error;
       }
       visitedSymlinks.add(candidatePath);
@@ -41,7 +52,7 @@ export async function resolveMutationTargetPath(filePath: string): Promise<strin
         .filter((part) => part.length > 0);
       return resolveFromParts(parse(linkTargetPath).root, [...targetParts, ...tail]);
     } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      if (getErrorCode(error) === "ENOENT") {
         return join(candidatePath, ...tail);
       }
       throw error;
@@ -58,7 +69,7 @@ export async function writeFileAtomically(filePath: string, content: string): Pr
   try {
     existingStats = await stat(targetPath);
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+    if (getErrorCode(error) !== "ENOENT") {
       throw error;
     }
   }

@@ -1,7 +1,7 @@
 {
   "name": "pi-hashline",
   "version": "0.1.0",
-  "description": "Pi extension for hashline-anchored reads, search, edits, file maps, and shell compaction",
+  "description": "Pi extension for hashline-anchored reads, search, edits, file maps, file exploration, and shell compaction",
   "keywords": [
     "code-map",
     "hashline",
@@ -30,6 +30,7 @@
     "knip": "knip"
   },
   "dependencies": {
+    "@ast-grep/napi": "^0.42.3",
     "diff": "^9.0.0",
     "file-type": "^22.0.1",
     "oxc-parser": "^0.132.0",

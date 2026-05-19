@@ -49,6 +49,7 @@ type GrepSearchParams = {
   maxFilesVisited?: number;
   respectGitignore?: boolean;
   countOnly?: boolean;
+  summary?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -225,6 +226,7 @@ function parseParams(params: unknown): GrepSearchParams {
     maxFilesVisited: getInteger(params["maxFilesVisited"], DEFAULT_MAX_FILES_VISITED, 1, 100_000),
     respectGitignore: getBoolean(params["respectGitignore"]),
     countOnly: getBoolean(params["countOnly"]),
+    summary: getBoolean(params["summary"]),
   };
 }
 
@@ -281,6 +283,9 @@ export function registerGrepTool(pi: ExtensionAPI): void {
         countOnly: Type.Optional(
           Type.Boolean({ description: "Return per-file match counts instead of anchored content" }),
         ),
+        summary: Type.Optional(
+          Type.Boolean({ description: "Return per-file match counts instead of anchored content" }),
+        ),
       },
       { additionalProperties: false },
     ),
@@ -312,7 +317,7 @@ export function registerGrepTool(pi: ExtensionAPI): void {
 
         const remainingMatches = maxMatches - matchedCount;
         const displayPath = relative(ctx.cwd, filePath) || filePath;
-        if (params.countOnly === true) {
+        if (params.countOnly === true || params.summary === true) {
           const fileMatchedCount = countMatches(file.text, matcher, remainingMatches);
           if (fileMatchedCount > 0) {
             counts.push({ path: displayPath, matches: fileMatchedCount });
@@ -335,7 +340,7 @@ export function registerGrepTool(pi: ExtensionAPI): void {
 
       const matchLimitReached = matchedCount >= maxMatches;
       const text =
-        params.countOnly === true
+        params.countOnly === true || params.summary === true
           ? formatCounts({
               counts,
               totalMatches: matchedCount,
@@ -359,7 +364,7 @@ export function registerGrepTool(pi: ExtensionAPI): void {
           truncated: matchLimitReached || fileCollection.truncated,
           matchLimitReached,
           fileLimitReached: fileCollection.truncated,
-          ...(params.countOnly === true ? { counts } : { matches }),
+          ...(params.countOnly === true || params.summary === true ? { counts } : { matches }),
         },
       };
     },

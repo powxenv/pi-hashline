@@ -425,24 +425,22 @@ function extractRustSymbols(content: string): FileSymbol[] | null {
     const trimmed = line.trim();
     const lineNum = i + 1;
 
-    if (trimmed.startsWith("fn ")) {
-      const match = trimmed.match(/^fn\s+(?<name>\w+)/);
-      if (match?.groups) {
-        const endLine = findRustBlockEnd(lines, i);
-        const isAsync = trimmed.includes("async ");
-        const isPub = trimmed.startsWith("pub ");
-        const mods: string[] = [];
-        if (isAsync) mods.push("async");
-        if (isPub) mods.push("pub");
-        symbols.push({
-          name: match.groups["name"]!,
-          kind: "function",
-          startLine: lineNum,
-          endLine,
-          modifiers: mods.length > 0 ? mods : undefined,
-        });
-      }
-    } else if (trimmed.match(/^pub?\s*struct\s+/)) {
+    const fnMatch = trimmed.match(/^(?:pub\s+)?(?:async\s+)?fn\s+(?<name>\w+)/);
+    if (fnMatch?.groups) {
+      const endLine = findRustBlockEnd(lines, i);
+      const isAsync = trimmed.includes("async ");
+      const isPub = trimmed.startsWith("pub ");
+      const mods: string[] = [];
+      if (isAsync) mods.push("async");
+      if (isPub) mods.push("pub");
+      symbols.push({
+        name: fnMatch.groups["name"]!,
+        kind: "function",
+        startLine: lineNum,
+        endLine,
+        modifiers: mods.length > 0 ? mods : undefined,
+      });
+    } else if (trimmed.match(/^(?:pub\s+)?struct\s+/)) {
       const match = trimmed.match(/struct\s+(?<name>\w+)/);
       if (match?.groups) {
         symbols.push({
@@ -452,7 +450,7 @@ function extractRustSymbols(content: string): FileSymbol[] | null {
           endLine: findRustBlockEnd(lines, i),
         });
       }
-    } else if (trimmed.match(/^pub?\s*enum\s+/)) {
+    } else if (trimmed.match(/^(?:pub\s+)?enum\s+/)) {
       const match = trimmed.match(/enum\s+(?<name>\w+)/);
       if (match?.groups) {
         symbols.push({
@@ -462,7 +460,7 @@ function extractRustSymbols(content: string): FileSymbol[] | null {
           endLine: findRustBlockEnd(lines, i),
         });
       }
-    } else if (trimmed.match(/^pub?\s*trait\s+/)) {
+    } else if (trimmed.match(/^(?:pub\s+)?trait\s+/)) {
       const match = trimmed.match(/trait\s+(?<name>\w+)/);
       if (match?.groups) {
         symbols.push({
@@ -472,7 +470,7 @@ function extractRustSymbols(content: string): FileSymbol[] | null {
           endLine: findRustBlockEnd(lines, i),
         });
       }
-    } else if (trimmed.match(/^pub?\s*impl\s+/)) {
+    } else if (trimmed.match(/^(?:pub\s+)?impl\s+/)) {
       const match = trimmed.match(/impl\s+(?:<[^>]+>\s+)?(?<name>\w+)/);
       if (match?.groups) {
         symbols.push({
@@ -482,7 +480,7 @@ function extractRustSymbols(content: string): FileSymbol[] | null {
           endLine: findRustBlockEnd(lines, i),
         });
       }
-    } else if (trimmed.match(/^pub?\s*mod\s+/)) {
+    } else if (trimmed.match(/^(?:pub\s+)?mod\s+/)) {
       const match = trimmed.match(/mod\s+(?<name>\w+)/);
       if (match?.groups) {
         symbols.push({
@@ -736,15 +734,198 @@ function extractCsvSymbols(content: string): FileSymbol[] | null {
   return symbols;
 }
 
+function detectTsJsLang(filePath: string): "ts" | "tsx" | "js" | "jsx" | "dts" {
+  if (filePath.endsWith(".d.ts")) return "dts";
+  if (filePath.endsWith(".tsx")) return "tsx";
+  if (filePath.endsWith(".jsx")) return "jsx";
+  if (filePath.endsWith(".js") || filePath.endsWith(".mjs") || filePath.endsWith(".cjs"))
+    return "js";
+  return "ts";
+}
+
+function findBraceBlockEnd(lines: string[], startIdx: number): number {
+  let braceCount = 0;
+  let foundOpen = false;
+  for (let i = startIdx; i < lines.length; i++) {
+    for (const char of lines[i]!) {
+      if (char === "{") {
+        braceCount += 1;
+        foundOpen = true;
+      } else if (char === "}") {
+        braceCount -= 1;
+        if (foundOpen && braceCount === 0) return i + 1;
+      }
+    }
+  }
+  return lines.length;
+}
+
+function extractJvmLikeSymbols(content: string): FileSymbol[] | null {
+  const symbols: FileSymbol[] = [];
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    const lineNum = i + 1;
+    if (!trimmed || trimmed.startsWith("//")) continue;
+
+    const typeMatch = trimmed.match(
+      /^(?:public|private|protected|internal|abstract|final|sealed|data|open|static|\s)*\s*(?<kind>class|interface|enum|object|record)\s+(?<name>[A-Za-z_]\w*)/,
+    );
+    if (typeMatch?.groups) {
+      const kindText = typeMatch.groups["kind"]!;
+      symbols.push({
+        name: typeMatch.groups["name"]!,
+        kind: kindText === "interface" ? "interface" : kindText === "enum" ? "enum" : "class",
+        startLine: lineNum,
+        endLine: findBraceBlockEnd(lines, i),
+        signature: trimmed.replace(/\s*\{\s*$/, ""),
+      });
+      continue;
+    }
+
+    const functionMatch = trimmed.match(
+      /^(?:public|private|protected|internal|static|final|open|override|suspend|async|\s)*\s*(?:fun\s+)?(?:[\w<>[\],.?]+\s+)+(?<name>[A-Za-z_]\w*)\s*\((?<params>[^)]*)\)/,
+    );
+    if (
+      functionMatch?.groups &&
+      !/^(if|for|while|switch|catch)$/.test(functionMatch.groups["name"]!)
+    ) {
+      symbols.push({
+        name: functionMatch.groups["name"]!,
+        kind: "function",
+        startLine: lineNum,
+        endLine: trimmed.includes("{") ? findBraceBlockEnd(lines, i) : lineNum,
+        signature: trimmed.replace(/\s*\{\s*$/, ""),
+      });
+    }
+  }
+
+  return symbols.length > 0 ? symbols : null;
+}
+
+function extractSwiftSymbols(content: string): FileSymbol[] | null {
+  const symbols: FileSymbol[] = [];
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    const lineNum = i + 1;
+    const typeMatch = trimmed.match(
+      /^(?:public|private|internal|fileprivate|open|final|\s)*\s*(?<kind>class|struct|enum|protocol|actor|extension)\s+(?<name>[A-Za-z_]\w*)/,
+    );
+    if (typeMatch?.groups) {
+      const kindText = typeMatch.groups["kind"]!;
+      symbols.push({
+        name:
+          kindText === "extension"
+            ? `extension ${typeMatch.groups["name"]!}`
+            : typeMatch.groups["name"]!,
+        kind:
+          kindText === "protocol"
+            ? "interface"
+            : kindText === "struct"
+              ? "struct"
+              : kindText === "enum"
+                ? "enum"
+                : "class",
+        startLine: lineNum,
+        endLine: findBraceBlockEnd(lines, i),
+        signature: trimmed.replace(/\s*\{\s*$/, ""),
+      });
+      continue;
+    }
+
+    const functionMatch = trimmed.match(
+      /^(?:public|private|internal|fileprivate|open|static|class|mutating|async|\s)*\s*func\s+(?<name>[A-Za-z_]\w*)\s*\((?<params>[^)]*)\)/,
+    );
+    if (functionMatch?.groups) {
+      symbols.push({
+        name: functionMatch.groups["name"]!,
+        kind: "function",
+        startLine: lineNum,
+        endLine: findBraceBlockEnd(lines, i),
+        signature: trimmed.replace(/\s*\{\s*$/, ""),
+      });
+    }
+  }
+
+  return symbols.length > 0 ? symbols : null;
+}
+
+function extractShellSymbols(content: string): FileSymbol[] | null {
+  const symbols: FileSymbol[] = [];
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    const nameMatch = trimmed.match(
+      /^(?:function\s+)?(?<name>[A-Za-z_][\w-]*)\s*(?:\(\s*\))?\s*\{/,
+    );
+    if (nameMatch?.groups) {
+      symbols.push({
+        name: nameMatch.groups["name"]!,
+        kind: "function",
+        startLine: i + 1,
+        endLine: findBraceBlockEnd(lines, i),
+        signature: trimmed.replace(/\s*\{\s*$/, ""),
+      });
+    }
+  }
+  return symbols.length > 0 ? symbols : null;
+}
+
+function extractClojureSymbols(content: string): FileSymbol[] | null {
+  const symbols: FileSymbol[] = [];
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    const nsMatch = trimmed.match(/^\(ns\s+(?<name>[^\s)]+)/);
+    if (nsMatch?.groups) {
+      symbols.push({
+        name: nsMatch.groups["name"]!,
+        kind: "namespace",
+        startLine: i + 1,
+        endLine: i + 1,
+      });
+      continue;
+    }
+    const defMatch = trimmed.match(
+      /^\((?<kind>defn|defn-|defmacro|defrecord|deftype|defprotocol|defmulti|defmethod|def)\s+(?<name>[^\s)]+)/,
+    );
+    if (defMatch?.groups) {
+      const kindText = defMatch.groups["kind"]!;
+      symbols.push({
+        name: defMatch.groups["name"]!,
+        kind:
+          kindText === "def"
+            ? "variable"
+            : kindText === "defrecord" || kindText === "deftype"
+              ? "class"
+              : "function",
+        startLine: i + 1,
+        endLine: i + 1,
+        signature: trimmed,
+      });
+    }
+  }
+  return symbols.length > 0 ? symbols : null;
+}
+
 const EXTRACTORS: Record<string, ExtractorFn> = {
-  typescript: (content, filePath) => extractOxcTsJs(content, filePath, "ts"),
-  javascript: (content, filePath) => extractOxcTsJs(content, filePath, "js"),
+  typescript: (content, filePath) => extractOxcTsJs(content, filePath, detectTsJsLang(filePath)),
+  javascript: (content, filePath) => extractOxcTsJs(content, filePath, detectTsJsLang(filePath)),
   python: (content) => extractPythonSymbols(content),
   go: (content) => extractGoSymbols(content),
   rust: (content) => extractRustSymbols(content),
   c: (content) => extractCCodeSymbols(content),
   "c-header": (content) => extractCCodeSymbols(content),
   cpp: (content) => extractCCodeSymbols(content),
+  java: (content) => extractJvmLikeSymbols(content),
+  kotlin: (content) => extractJvmLikeSymbols(content),
+  swift: (content) => extractSwiftSymbols(content),
+  shell: (content) => extractShellSymbols(content),
+  clojure: (content) => extractClojureSymbols(content),
+  edn: (content) => extractClojureSymbols(content),
   markdown: (content) => extractMarkdownSymbols(content),
   sql: (content) => extractSqlSymbols(content),
   json: (content) => extractJsonSymbols(content),

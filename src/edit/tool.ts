@@ -20,7 +20,7 @@ import { getFileSnapshot } from "../shared/snapshot";
 import { writeFileAtomically } from "../shared/fs-write";
 import { getCachedFileMap } from "../filemap/cache";
 import { formatSymbolLookupFailure, lookupSymbol } from "../filemap/symbols";
-
+import { buildSyntaxRegressionWarning } from "../shared/syntax";
 const EDIT_PROMPT_SNIPPET = `Edit a text file via LINE#HASH anchors copied from read`;
 
 const EDIT_PROMPT_GUIDELINES = [
@@ -496,7 +496,8 @@ Errors come back as text starting with a bracketed code (e.g. [E_STALE_ANCHOR], 
         try {
           await fsAccess(absolutePath, constants.R_OK | constants.W_OK);
         } catch (error: unknown) {
-          const code = (error as NodeJS.ErrnoException).code;
+          const code =
+            isRecord(error) && typeof error["code"] === "string" ? error["code"] : undefined;
           if (code === "ENOENT") throw new Error(`File not found: ${normalizedParams.path}`);
           if (code === "EACCES" || code === "EPERM")
             throw new Error(`File is not writable: ${normalizedParams.path}`);
@@ -537,6 +538,14 @@ Errors come back as text starting with a bracketed code (e.g. [E_STALE_ANCHOR], 
         }
 
         throwIfAborted(signal);
+        const syntaxWarning = buildSyntaxRegressionWarning({
+          filePath: absolutePath,
+          before: originalNormalized,
+          after: result,
+        });
+        const editWarnings = editResult.warnings ?? [];
+        const warnings = syntaxWarning === null ? editWarnings : [...editWarnings, syntaxWarning];
+
         await writeFileAtomically(absolutePath, bom + restoreLineEndings(result, originalEnding));
         const updatedSnapshotId = (await getFileSnapshot(absolutePath)).snapshotId;
 
@@ -547,7 +556,7 @@ Errors come back as text starting with a bracketed code (e.g. [E_STALE_ANCHOR], 
           firstChangedLine,
           lastChangedLine,
           snapshotId: updatedSnapshotId,
-          warnings: editResult.warnings,
+          warnings,
           compatibilityDetails: undefined,
           returnMode: normalizedParams.returnMode ?? "changed",
           returnRanges: normalizedParams.returnRanges,
