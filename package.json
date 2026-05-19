@@ -50,13 +50,13 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.75.3",
-    "@types/bun": "latest",
-    "@types/node": "^25.9.0",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^25.9.1",
     "@types/xxhashjs": "^0.2.4",
-    "@typescript/native-preview": "^7.0.0-dev.20260518.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260519.1",
     "knip": "^6.14.1",
-    "oxfmt": "^0.50.0",
-    "oxlint": "^1.65.0",
+    "oxfmt": "^0.51.0",
+    "oxlint": "^1.66.0",
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
