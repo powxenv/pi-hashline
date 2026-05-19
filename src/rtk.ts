@@ -79,7 +79,7 @@ function updateFooterStatus(ctx: ExtensionContext): void {
 }
 
 function isRtkSubcommand(value: string): value is (typeof VALID_RTK_SUBCOMMANDS)[number] {
-  return (VALID_RTK_SUBCOMMANDS as readonly string[]).includes(value);
+  return VALID_RTK_SUBCOMMANDS.some((subcommand) => subcommand === value);
 }
 
 function handleRtkSubcommand(

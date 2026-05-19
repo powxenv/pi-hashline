@@ -18,11 +18,39 @@ function countLines(content: string): number {
   return content.endsWith("\n") ? lines.length - 1 : lines.length;
 }
 
-interface AstNode {
+type AstNode = Record<string, unknown> & {
   type: string;
   start: number;
   end: number;
-  [key: string]: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAstNode(value: unknown): value is AstNode {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value["type"] === "string" &&
+    typeof value["start"] === "number" &&
+    typeof value["end"] === "number"
+  );
+}
+
+function getAstNodeProperty(node: AstNode, key: string): AstNode | null {
+  const value = node[key];
+  return isAstNode(value) ? value : null;
+}
+
+function getAstNodeArrayProperty(node: AstNode, key: string): AstNode[] {
+  const value = node[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter(isAstNode);
+}
+
+function getStringProperty(node: AstNode, key: string): string | undefined {
+  const value = node[key];
+  return typeof value === "string" ? value : undefined;
 }
 
 function extractOxcTsJs(
@@ -48,8 +76,10 @@ function extractOxcTsJs(
       }
     }
 
-    const body = (result.program as unknown as AstNode).body as AstNode[];
-    if (!body) return symbols.length > 0 ? symbols : null;
+    const programValue: unknown = result.program;
+    const bodyValue = isRecord(programValue) ? programValue["body"] : undefined;
+    const body: AstNode[] = Array.isArray(bodyValue) ? bodyValue.filter(isAstNode) : [];
+    if (body.length === 0) return symbols.length > 0 ? symbols : null;
 
     for (const node of body) {
       const sym = extractTsNode(node, content);
@@ -79,7 +109,7 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
   switch (node.type) {
     case "FunctionDeclaration":
     case "TSEmptyBodyFunctionExpression": {
-      const id = node.id as AstNode | null;
+      const id = getAstNodeProperty(node, "id");
       if (!id) return null;
       const name = content.slice(id.start, id.end);
       const async = node.async === true;
@@ -99,15 +129,15 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
     }
     case "ClassDeclaration":
     case "ClassExpression": {
-      const id = node.id as AstNode | null;
+      const id = getAstNodeProperty(node, "id");
       const name = id ? content.slice(id.start, id.end) : "<anonymous>";
       const abstract = node.abstract === true;
       const mods: string[] = [];
       if (abstract) mods.push("abstract");
-      const body = node.body as AstNode | null;
+      const body = getAstNodeProperty(node, "body");
       const children: FileSymbol[] = [];
-      if (body && typeof body.body === "object" && Array.isArray(body.body)) {
-        for (const member of body.body as AstNode[]) {
+      if (body) {
+        for (const member of getAstNodeArrayProperty(body, "body")) {
           const child = extractClassMember(member, content, name);
           if (child) children.push(child);
         }
@@ -122,14 +152,14 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
       };
     }
     case "TSEnumDeclaration": {
-      const id = node.id as AstNode | null;
+      const id = getAstNodeProperty(node, "id");
       if (!id) return null;
       const name = content.slice(id.start, id.end);
-      const body = node.body as AstNode | null;
+      const body = getAstNodeProperty(node, "body");
       const children: FileSymbol[] = [];
-      if (body && typeof body.body === "object" && Array.isArray(body.body)) {
-        for (const member of body.body as AstNode[]) {
-          const memberId = member.id as AstNode | null;
+      if (body) {
+        for (const member of getAstNodeArrayProperty(body, "body")) {
+          const memberId = getAstNodeProperty(member, "id");
           if (memberId) {
             children.push({
               name: content.slice(memberId.start, memberId.end),
@@ -149,7 +179,7 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
       };
     }
     case "TSInterfaceDeclaration": {
-      const id = node.id as AstNode | null;
+      const id = getAstNodeProperty(node, "id");
       if (!id) return null;
       return {
         name: content.slice(id.start, id.end),
@@ -159,7 +189,7 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
       };
     }
     case "TSTypeAliasDeclaration": {
-      const id = node.id as AstNode | null;
+      const id = getAstNodeProperty(node, "id");
       if (!id) return null;
       return {
         name: content.slice(id.start, id.end),
@@ -169,15 +199,15 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
       };
     }
     case "VariableDeclaration": {
-      const kind = node.kind as string;
-      const declarations = node.declarations as AstNode[] | undefined;
+      const kind = getStringProperty(node, "kind") ?? "var";
+      const declarations = getAstNodeArrayProperty(node, "declarations");
       if (!declarations) return null;
       const results: FileSymbol[] = [];
       for (const decl of declarations) {
-        const declId = decl.id as AstNode | null;
+        const declId = getAstNodeProperty(decl, "id");
         if (!declId) continue;
         const name = content.slice(declId.start, declId.end);
-        const init = decl.init as AstNode | null;
+        const init = getAstNodeProperty(decl, "init");
         const isArrowOrFn =
           init && (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression");
         results.push({
@@ -192,7 +222,7 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
     }
     case "ExportNamedDeclaration":
     case "ExportDefaultDeclaration": {
-      const declaration = node.declaration as AstNode | undefined;
+      const declaration = getAstNodeProperty(node, "declaration");
       if (declaration) {
         const inner = extractTsNode(declaration, content);
         if (inner) {
@@ -220,19 +250,18 @@ function extractClassMember(node: AstNode, content: string, _className: string):
   const endLine = offsetToLine(content, node.end);
 
   if (node.type === "MethodDefinition" || node.type === "PropertyDefinition") {
-    const key = node.key as AstNode | null;
+    const key = getAstNodeProperty(node, "key");
     if (!key) return null;
     const name = content.slice(key.start, key.end);
-    const kind = node.kind as string;
+    const kind = getStringProperty(node, "kind") ?? "method";
     const isStatic = node.static === true;
-    const isAsync =
-      node.value && typeof node.value === "object" && (node.value as AstNode).async === true;
+    const value = getAstNodeProperty(node, "value");
+    const isAsync = value?.async === true;
     const mods: string[] = [];
     if (isStatic) mods.push("static");
     if (isAsync) mods.push("async");
     if (kind === "get" || kind === "set") mods.push(kind);
 
-    const value = node.value as AstNode | null;
     const params = value ? extractParams(value, content) : "";
     return {
       name,
@@ -252,18 +281,13 @@ function extractClassMember(node: AstNode, content: string, _className: string):
 }
 
 function extractParams(node: AstNode, content: string): string {
-  const params = node.params as AstNode[] | undefined;
-  if (!params || !Array.isArray(params)) return "";
+  const params = getAstNodeArrayProperty(node, "params");
+  if (params.length === 0) return "";
   return params
     .map((p) => {
       const pattern = p.pattern ?? p;
-      if (
-        typeof pattern === "object" &&
-        pattern !== null &&
-        "start" in pattern &&
-        "end" in pattern
-      ) {
-        return content.slice((pattern as AstNode).start, (pattern as AstNode).end);
+      if (isAstNode(pattern)) {
+        return content.slice(pattern.start, pattern.end);
       }
       return "?";
     })
@@ -636,8 +660,8 @@ function extractSqlSymbols(content: string): FileSymbol[] | null {
 function extractJsonSymbols(content: string): FileSymbol[] | null {
   const symbols: FileSymbol[] = [];
   try {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    const parsed: unknown = JSON.parse(content);
+    if (isRecord(parsed)) {
       for (const key of Object.keys(parsed)) {
         const val = parsed[key];
         const kindStr = Array.isArray(val) ? "array" : typeof val;

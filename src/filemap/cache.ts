@@ -133,7 +133,7 @@ async function readPersistentCache(snapshotId: string): Promise<FileMap | null |
   if (process.env["PI_HASHLINE_NO_PERSIST_MAPS"] === "1") return undefined;
   try {
     const raw = await readFile(getPersistentCachePath(snapshotId), "utf8");
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) return undefined;
     if (parsed["version"] !== CACHE_VERSION) return undefined;
     const fileMap = parsed["fileMap"];
