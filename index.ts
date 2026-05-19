@@ -3,6 +3,7 @@ import { registerReadTool } from "./src/read/tool";
 import { registerEditTool } from "./src/edit/tool";
 import { registerWriteTool } from "./src/write/tool";
 import { registerGrepTool } from "./src/grep/tool";
+import { registerOutlineTool } from "./src/outline/tool";
 import { registerRtk } from "./src/rtk";
 
 export default function (pi: ExtensionAPI): void {
@@ -10,5 +11,6 @@ export default function (pi: ExtensionAPI): void {
   registerEditTool(pi);
   registerWriteTool(pi);
   registerGrepTool(pi);
+  registerOutlineTool(pi);
   registerRtk(pi);
 }
