@@ -24,7 +24,7 @@ Restart Pi after installation so the replacement tools are registered.
 - Safer file edits using anchored read output
 - Anchored search results for editing matches without extra reads, with `.gitignore`, include/exclude globs, asymmetric context, and count-only mode
 - Deterministic `ls` and `.gitignore`-aware `find` for file exploration without shell noise
-- Syntax-aware `ast_search` for TypeScript, TSX/JSX, JavaScript, HTML, and CSS structural patterns
+- Syntax-aware `ast_search` for TypeScript, TSX/JSX, JavaScript, HTML, and CSS structural patterns, including ast-grep rule objects
 - Write output with fresh anchors for immediate follow-up edits
 - Compact maps, symbol reads, and an `outline` tool for navigating large files without loading full contents
 - Symbol replacement for supported mapped files, with syntax-regression warnings for JS/TS edits
@@ -36,7 +36,7 @@ Restart Pi after installation so the replacement tools are registered.
 
 When reading large files, `pi-hashline` can add a compact outline of the file so agents can jump directly to relevant sections instead of scanning the entire file. Agents can also read or replace mapped symbols by name.
 
-Supported languages include TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, C/C++, Java, Kotlin, Swift, Shell, Clojure/EDN, SQL, JSON, Markdown, YAML, TOML, and CSV. File maps are cached in memory and persisted under the user cache directory for faster repeated reads.
+Supported languages include TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, C/C++, Java, Kotlin, Swift, Shell, Clojure/EDN, SQL, JSON, Markdown, YAML, TOML, and CSV. File maps are cached in memory and persisted under the user cache directory for faster repeated reads, with automatic count/age pruning.
 
 ## Bash output compaction
 

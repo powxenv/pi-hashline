@@ -75,6 +75,32 @@ describe("project file collection", () => {
     ]);
   });
 
+  test("supports escaped gitignore prefixes and spaces", async () => {
+    const root = await createTempRoot();
+    await writeFile(
+      join(root, ".gitignore"),
+      "\\#config\n\\!literal.ts\nspace\\ file.ts\n*.log\n!important.log\n",
+    );
+    await writeFile(join(root, "#config"), "secret\n");
+    await writeFile(join(root, "!literal.ts"), "export const literal = 1;\n");
+    await writeFile(join(root, "space file.ts"), "export const spaced = 1;\n");
+    await writeFile(join(root, "ignored.log"), "ignored\n");
+    await writeFile(join(root, "important.log"), "kept\n");
+    await writeFile(join(root, "kept.ts"), "export const kept = 1;\n");
+
+    const result = await collectProjectFiles({
+      rootPath: root,
+      cwd: root,
+      signal: undefined,
+    });
+
+    expect(result.files.map((file) => relative(root, file)).sort()).toEqual([
+      ".gitignore",
+      "important.log",
+      "kept.ts",
+    ]);
+  });
+
   test("matches basename and path globs", () => {
     expect(matchesProjectGlob("src/app.ts", "*.ts")).toBe(true);
     expect(matchesProjectGlob("src/app.ts", "src/*.ts")).toBe(true);

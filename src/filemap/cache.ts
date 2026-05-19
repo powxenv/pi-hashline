@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -9,6 +9,8 @@ import { getFileSnapshot } from "../shared/snapshot";
 
 const MAX_CACHE_ENTRIES = 64;
 const CACHE_VERSION = 1;
+const DEFAULT_MAX_PERSISTENT_CACHE_FILES = 2048;
+const DEFAULT_MAX_PERSISTENT_CACHE_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const cache = new Map<string, FileMap | null>();
 
@@ -77,6 +79,56 @@ function getPersistentCachePath(snapshotId: string): string {
   return join(getCacheBaseDir(), `${key}.json`);
 }
 
+function getPositiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getPersistentCacheLimits(): { maxFiles: number; maxAgeMs: number } {
+  return {
+    maxFiles: getPositiveIntegerEnv(
+      "PI_HASHLINE_MAP_CACHE_MAX_FILES",
+      DEFAULT_MAX_PERSISTENT_CACHE_FILES,
+    ),
+    maxAgeMs: getPositiveIntegerEnv(
+      "PI_HASHLINE_MAP_CACHE_MAX_AGE_MS",
+      DEFAULT_MAX_PERSISTENT_CACHE_AGE_MS,
+    ),
+  };
+}
+
+async function prunePersistentCache(): Promise<void> {
+  if (process.env["PI_HASHLINE_NO_PERSIST_MAPS"] === "1") return;
+  try {
+    const cacheBaseDir = getCacheBaseDir();
+    const entries = await readdir(cacheBaseDir, { withFileTypes: true });
+    const now = Date.now();
+    const limits = getPersistentCacheLimits();
+    const candidates: Array<{ path: string; mtimeMs: number }> = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const cachePath = join(cacheBaseDir, entry.name);
+      const cacheStat = await stat(cachePath);
+      if (now - cacheStat.mtimeMs > limits.maxAgeMs) {
+        await rm(cachePath, { force: true });
+        continue;
+      }
+      candidates.push({ path: cachePath, mtimeMs: cacheStat.mtimeMs });
+    }
+
+    if (candidates.length <= limits.maxFiles) return;
+    const excess = candidates
+      .sort((left, right) => left.mtimeMs - right.mtimeMs)
+      .slice(0, candidates.length - limits.maxFiles);
+    await Promise.all(excess.map((entry) => rm(entry.path, { force: true })));
+  } catch {
+    return;
+  }
+}
+
 async function readPersistentCache(snapshotId: string): Promise<FileMap | null | undefined> {
   if (process.env["PI_HASHLINE_NO_PERSIST_MAPS"] === "1") return undefined;
   try {
@@ -100,6 +152,7 @@ async function writePersistentCache(snapshotId: string, fileMap: FileMap | null)
     const cachePath = getPersistentCachePath(snapshotId);
     await mkdir(getCacheBaseDir(), { recursive: true });
     await writeFile(cachePath, JSON.stringify({ version: CACHE_VERSION, fileMap }), "utf8");
+    await prunePersistentCache();
   } catch {
     return;
   }

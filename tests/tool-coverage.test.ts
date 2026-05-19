@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -8,6 +8,7 @@ import { executeFind } from "../src/find/tool";
 import { executeLs } from "../src/ls/tool";
 import { buildSyntaxRegressionWarning } from "../src/shared/syntax";
 import { generateMap } from "../src/filemap/extract";
+import { getCachedFileMap } from "../src/filemap/cache";
 
 const tempRoots: string[] = [];
 
@@ -116,6 +117,40 @@ describe("ast_search", () => {
     expect(result.content[0]?.text).toContain("main.ts:1#");
     expect(result.content[0]?.text).not.toContain("target(3)");
   });
+
+  test("supports ast-grep rule objects with pattern selectors", async () => {
+    const root = await createTempRoot();
+    await writeFile(join(root, "rules.ts"), "const value = 1;\nlet other = 2;\n");
+
+    const result = await executeAstSearch({
+      rawParams: {
+        rule: {
+          pattern: {
+            context: "const $NAME = $VALUE",
+            selector: "lexical_declaration",
+          },
+        },
+      },
+      cwd: root,
+    });
+    const text = result.content[0]?.text ?? "";
+
+    expect(result.details.matches).toBe(1);
+    expect(text).toContain("const value = 1;");
+    expect(text).not.toContain("let other = 2;");
+  });
+
+  test("rejects invalid rule objects early", async () => {
+    const root = await createTempRoot();
+    await writeFile(join(root, "rules.ts"), "const value = 1;\n");
+
+    await expect(
+      executeAstSearch({
+        rawParams: { pattern: "foo($A)", rule: { pattern: "bar($A)" } },
+        cwd: root,
+      }),
+    ).rejects.toThrow('either "pattern" or "rule"');
+  });
 });
 
 describe("syntax validation and file maps", () => {
@@ -157,5 +192,35 @@ describe("syntax validation and file maps", () => {
     expect(swift?.symbols.map((symbol) => symbol.name)).toContain("User");
     expect(shell?.symbols.map((symbol) => symbol.name)).toContain("deploy");
     expect(clojure?.symbols.map((symbol) => symbol.name)).toEqual(["demo.core", "run"]);
+  });
+
+  test("prunes persistent map cache by file count", async () => {
+    const root = await createTempRoot();
+    const cacheDir = join(root, "cache");
+    const previousCacheDir = process.env["PI_HASHLINE_MAP_CACHE_DIR"];
+    const previousMaxFiles = process.env["PI_HASHLINE_MAP_CACHE_MAX_FILES"];
+    process.env["PI_HASHLINE_MAP_CACHE_DIR"] = cacheDir;
+    process.env["PI_HASHLINE_MAP_CACHE_MAX_FILES"] = "2";
+
+    try {
+      for (let index = 0; index < 4; index++) {
+        const filePath = join(root, `file-${index}.ts`);
+        const content = `export const value${index} = ${index};\n`;
+        await writeFile(filePath, content);
+        await getCachedFileMap({
+          filePath,
+          content,
+          totalBytes: Buffer.byteLength(content, "utf8"),
+        });
+      }
+
+      const cacheFiles = (await readdir(cacheDir)).filter((entry) => entry.endsWith(".json"));
+      expect(cacheFiles.length).toBeLessThanOrEqual(2);
+    } finally {
+      if (previousCacheDir === undefined) delete process.env["PI_HASHLINE_MAP_CACHE_DIR"];
+      else process.env["PI_HASHLINE_MAP_CACHE_DIR"] = previousCacheDir;
+      if (previousMaxFiles === undefined) delete process.env["PI_HASHLINE_MAP_CACHE_MAX_FILES"];
+      else process.env["PI_HASHLINE_MAP_CACHE_MAX_FILES"] = previousMaxFiles;
+    }
   });
 });

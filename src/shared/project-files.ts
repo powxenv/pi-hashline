@@ -41,7 +41,15 @@ function globToRegExpSource(pattern: string): string {
   let source = "";
   for (let index = 0; index < pattern.length; index++) {
     const char = pattern[index];
-    if (char === "*") {
+    if (char === "\\") {
+      const next = pattern[index + 1];
+      if (next !== undefined) {
+        source += escapeRegExpChar(next);
+        index += 1;
+      } else {
+        source += escapeRegExpChar(char);
+      }
+    } else if (char === "*") {
       const next = pattern[index + 1];
       if (next === "*") {
         const afterNext = pattern[index + 2];
@@ -88,19 +96,39 @@ function matchesAnyProjectGlob(relativePath: string, patterns: string[]): boolea
   return patterns.some((pattern) => matchesProjectGlob(relativePath, pattern));
 }
 
-function normalizeGitignoreLine(line: string): string | null {
-  const trimmedEnd = line.trimEnd();
+function isEscapedAt(text: string, index: number): boolean {
+  let slashCount = 0;
+  for (let current = index - 1; current >= 0 && text[current] === "\\"; current--) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
+}
+
+function trimUnescapedTrailingWhitespace(line: string): string {
+  let end = line.length;
+  while (end > 0) {
+    const char = line[end - 1];
+    if (char !== " " && char !== "\t") break;
+    if (isEscapedAt(line, end - 1)) break;
+    end -= 1;
+  }
+  return line.slice(0, end);
+}
+
+function normalizeGitignoreLine(line: string): { pattern: string; negated: boolean } | null {
+  const trimmedEnd = trimUnescapedTrailingWhitespace(line);
   if (trimmedEnd.length === 0) return null;
-  if (trimmedEnd.startsWith("#")) return null;
-  return trimmedEnd;
+  if (trimmedEnd[0] === "#" && !isEscapedAt(trimmedEnd, 0)) return null;
+  const negated = trimmedEnd[0] === "!" && !isEscapedAt(trimmedEnd, 0);
+  return { pattern: negated ? trimmedEnd.slice(1) : trimmedEnd, negated };
 }
 
 function compileIgnoreRule(line: string, basePath: string): IgnoreRule | null {
   const normalized = normalizeGitignoreLine(line);
   if (normalized === null) return null;
 
-  const negated = normalized.startsWith("!");
-  const withoutNegation = negated ? normalized.slice(1) : normalized;
+  const negated = normalized.negated;
+  const withoutNegation = normalized.pattern;
   if (withoutNegation.length === 0) return null;
 
   const directoryOnly = withoutNegation.endsWith("/");
