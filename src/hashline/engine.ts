@@ -174,6 +174,8 @@ function formatMismatchError(
   const maxDisplayLine = sorted[sorted.length - 1] ?? 1;
   const lineNumberWidth = String(maxDisplayLine).length;
   const out: string[] = [
+    `[E_STALE_ANCHOR] ${mismatches.length} stale anchor${mismatches.length > 1 ? "s" : ""}. No changes were applied. Retry with the >>> LINE#HASH lines below; keep both endpoints for range replaces.`,
+    "",
     `[E_STALE_ANCHOR] ${mismatches.length} stale anchor${mismatches.length > 1 ? "s" : ""}. Retry with the >>> LINE#HASH lines below; keep both endpoints for range replaces.`,
     "",
   ];
@@ -342,7 +344,7 @@ function throwEditConflict(
   reason: string,
 ): never {
   throw new Error(
-    `[E_EDIT_CONFLICT] Conflicting edits in a single request: edit ${left.index} (${left.label}) and edit ${right.index} (${right.label}) ${reason}. Merge them into one non-overlapping change or split the request.`,
+    `[E_EDIT_CONFLICT] Conflicting edits in a single request: edit ${left.index} (${left.label}) and edit ${right.index} (${right.label}) ${reason}. No changes were applied. Merge them into one non-overlapping change or split the request.`,
   );
 }
 

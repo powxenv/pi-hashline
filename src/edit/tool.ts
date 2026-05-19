@@ -31,6 +31,7 @@ const EDIT_PROMPT_GUIDELINES = [
   "Submit all edits for one file in a single edits array.",
   "Use replace_text only when a match is guaranteed unique; otherwise read first and use anchors.",
   "Use edit for file modifications instead of shell sed -i, perl -pi, or ad-hoc rewrite scripts.",
+  "If an edit call fails before success output, treat the entire call as unapplied; reread and retry with fresh anchors.",
 ];
 
 const hashlineEditLinesSchema = Type.Union([
@@ -477,6 +478,7 @@ Rules:
 - lines is literal file content: no LINE#HASH: prefix, no leading +/-. Match indentation exactly.
 - Do not guess, shift, or construct anchors. Copy them from the most recent read of this file.
 - Do not emit overlapping or adjacent edits — merge them into one.
+- Failed validation/stale-anchor/conflict responses are atomic: no file changes are written before success output.
 
 On success (changed mode, default) the returned text is an --- Anchors A-B --- block with fresh LINE#HASH lines for the changed region. Use those for nearby follow-up edits in the same file without re-reading. For distant follow-ups, or on any error, call read again.
 

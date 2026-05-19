@@ -51,6 +51,7 @@ describe("hashline editing", () => {
   test("rejects stale anchors", () => {
     const edits = resolveEditAnchors([{ op: "replace", pos: "2#ZZ", lines: ["BETA"] }]);
     expect(() => applyHashlineEdits("alpha\nbeta\n", edits)).toThrow("[E_STALE_ANCHOR]");
+    expect(() => applyHashlineEdits("alpha\nbeta\n", edits)).toThrow("No changes were applied");
   });
 
   test("rejects overlapping edits", () => {
@@ -60,6 +61,7 @@ describe("hashline editing", () => {
       { op: "replace", pos: anchor(2, "b"), lines: ["y"] },
     ]);
     expect(() => applyHashlineEdits(content, edits)).toThrow("[E_EDIT_CONFLICT]");
+    expect(() => applyHashlineEdits(content, edits)).toThrow("No changes were applied");
   });
 
   test("replace_text requires a unique match", () => {
