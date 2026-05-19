@@ -30,6 +30,7 @@ const EDIT_PROMPT_GUIDELINES = [
   "Copy anchors verbatim from read output — do not guess, renumber, shift, or construct anchors.",
   "Submit all edits for one file in a single edits array.",
   "Use replace_text only when a match is guaranteed unique; otherwise read first and use anchors.",
+  "Use edit for file modifications instead of shell sed -i, perl -pi, or ad-hoc rewrite scripts.",
 ];
 
 const hashlineEditLinesSchema = Type.Union([

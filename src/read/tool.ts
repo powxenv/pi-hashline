@@ -92,6 +92,7 @@ const READ_PROMPT_SNIPPET = `Read a text file with LINE#HASH anchors for edit`;
 const READ_PROMPT_GUIDELINES = [
   "Use read before edit when you do not have current LINE#HASH anchors for the file.",
   "If read is truncated, continue with the offset it suggests — do not guess unseen lines.",
+  "For sed-style range inspection, use read with offset=A and limit=B-A+1 instead of bash sed -n 'A,Bp'.",
 ];
 
 export function registerReadTool(pi: ExtensionAPI): void {

@@ -19,12 +19,12 @@ Restart Pi after installation so the replacement tools are registered.
 
 ## What it does
 
-`pi-hashline` replaces Pi's default `read`, `grep`, `edit`, `write`, and `bash` tools with versions optimized for agent workflows:
+`pi-hashline` replaces Pi's default `read`, `grep`, `edit`, `write`, and `bash` tools and adds context-optimized navigation tools for agent workflows:
 
 - Safer file edits using anchored read output
-- Anchored search results for editing matches without extra reads
+- Anchored search results for editing matches without extra reads, with `.gitignore`, include/exclude globs, asymmetric context, and count-only mode
 - Write output with fresh anchors for immediate follow-up edits
-- Compact maps and symbol reads for navigating large files
+- Compact maps, symbol reads, and an `outline` tool for navigating large files without loading full contents
 - Symbol replacement for supported mapped files
 - Built-in bash output compaction to reduce context usage
 - Optional command rewriting through `rtk`

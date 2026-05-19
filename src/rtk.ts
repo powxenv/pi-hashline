@@ -1,9 +1,18 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createBashTool, createLocalBashOperations } from "@earendil-works/pi-coding-agent";
+import {
+  createBashToolDefinition,
+  createLocalBashOperations,
+} from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 
 const REWRITE_TIMEOUT_MS = 5000;
 const VALID_RTK_SUBCOMMANDS = ["enable", "disable", "status"] as const;
+const BASH_PROMPT_GUIDELINES = [
+  "Use grep instead of bash grep for project searches so results include edit-ready anchors.",
+  "Use read with offset/limit instead of bash sed -n for file range inspection.",
+  "Use edit instead of shell sed -i, perl -pi, or ad-hoc scripts for file modifications.",
+  "Use bash for commands that truly need a shell, such as builds, tests, package scripts, and system commands.",
+];
 
 let sessionEnabled = true;
 let rtkUnavailableNotified = false;
@@ -43,7 +52,7 @@ function rtkRewriteCommand(command: string): string | undefined {
 
     if (result.error) {
       const reason = classifySpawnError(result.error);
-      if (reason !== "other") alertRtkUnavailable(reason as RtkUnavailableReason);
+      if (reason !== "other") alertRtkUnavailable(reason);
       return undefined;
     }
 
@@ -100,7 +109,7 @@ function showRtkStatus(ctx: ExtensionContext): void {
 
   if (version.error) {
     const reason = classifySpawnError(version.error);
-    if (reason !== "other") alertRtkUnavailable(reason as RtkUnavailableReason);
+    if (reason !== "other") alertRtkUnavailable(reason);
   } else {
     rtkUnavailableNotified = false;
     const versionText = (version.stdout ?? "").trim() || "version unknown";
@@ -128,14 +137,17 @@ export function registerRtk(pi: ExtensionAPI): void {
   const cwd = process.cwd();
   const localBashOperations = createLocalBashOperations();
 
-  const bashTool = createBashTool(cwd, {
+  const bashTool = createBashToolDefinition(cwd, {
     spawnHook: ({ command, cwd, env }) => {
       if (!isSessionEnabled()) return { command, cwd, env };
       return { command: rtkRewriteCommand(command) ?? command, cwd, env };
     },
   });
 
-  pi.registerTool(bashTool);
+  pi.registerTool({
+    ...bashTool,
+    promptGuidelines: [...(bashTool.promptGuidelines ?? []), ...BASH_PROMPT_GUIDELINES],
+  });
 
   pi.registerCommand("rtk", {
     description: "Control rtk shell command rewriting",
@@ -167,7 +179,7 @@ export function registerRtk(pi: ExtensionAPI): void {
     if (!result.error) return;
 
     const reason = classifySpawnError(result.error);
-    if (reason !== "other") alertRtkUnavailable(reason as RtkUnavailableReason);
+    if (reason !== "other") alertRtkUnavailable(reason);
   });
 
   pi.on("user_bash", (event, ctx) => {
