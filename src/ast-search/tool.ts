@@ -1,6 +1,17 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Lang, parse } from "@ast-grep/napi";
-import type { NapiConfig, Rule } from "@ast-grep/napi";
+import { Lang, parse, registerDynamicLanguage } from "@ast-grep/napi";
+import type { DynamicLangRegistrations, NapiConfig, Rule } from "@ast-grep/napi";
+import bashLang from "@ast-grep/lang-bash";
+import cLang from "@ast-grep/lang-c";
+import cppLang from "@ast-grep/lang-cpp";
+import goLang from "@ast-grep/lang-go";
+import javaLang from "@ast-grep/lang-java";
+import kotlinLang from "@ast-grep/lang-kotlin";
+import pythonLang from "@ast-grep/lang-python";
+import rubyLang from "@ast-grep/lang-ruby";
+import rustLang from "@ast-grep/lang-rust";
+import swiftLang from "@ast-grep/lang-swift";
+import yamlLang from "@ast-grep/lang-yaml";
 import { Type } from "typebox";
 import { extname, relative } from "node:path";
 
@@ -15,29 +26,91 @@ const DEFAULT_LIMIT = 100;
 const DEFAULT_CONTEXT_LINES = 0;
 const DEFAULT_MAX_FILES_VISITED = 20_000;
 
-const BUILTIN_LANG_EXTENSIONS = new Map<string, Lang>([
-  [".ts", Lang.TypeScript],
-  [".mts", Lang.TypeScript],
-  [".cts", Lang.TypeScript],
-  [".tsx", Lang.Tsx],
-  [".js", Lang.JavaScript],
-  [".mjs", Lang.JavaScript],
-  [".cjs", Lang.JavaScript],
-  [".jsx", Lang.Tsx],
-  [".html", Lang.Html],
-  [".htm", Lang.Html],
-  [".css", Lang.Css],
+type AstLanguage = { name: string; parser: Lang | string };
+
+const DYNAMIC_LANGUAGE_REGISTRATIONS: DynamicLangRegistrations = {
+  bash: bashLang,
+  c: cLang,
+  cpp: cppLang,
+  go: goLang,
+  java: javaLang,
+  kotlin: kotlinLang,
+  python: pythonLang,
+  ruby: rubyLang,
+  rust: rustLang,
+  swift: swiftLang,
+  yaml: yamlLang,
+};
+
+registerDynamicLanguage(DYNAMIC_LANGUAGE_REGISTRATIONS);
+
+const NAPI_LANGUAGE_EXTENSIONS = new Map<string, AstLanguage>([
+  [".ts", { name: "typescript", parser: Lang.TypeScript }],
+  [".mts", { name: "typescript", parser: Lang.TypeScript }],
+  [".cts", { name: "typescript", parser: Lang.TypeScript }],
+  [".tsx", { name: "tsx", parser: Lang.Tsx }],
+  [".js", { name: "javascript", parser: Lang.JavaScript }],
+  [".mjs", { name: "javascript", parser: Lang.JavaScript }],
+  [".cjs", { name: "javascript", parser: Lang.JavaScript }],
+  [".jsx", { name: "tsx", parser: Lang.Tsx }],
+  [".html", { name: "html", parser: Lang.Html }],
+  [".htm", { name: "html", parser: Lang.Html }],
+  [".css", { name: "css", parser: Lang.Css }],
 ]);
 
-const LANGUAGE_ALIASES = new Map<string, Lang>([
-  ["ts", Lang.TypeScript],
-  ["typescript", Lang.TypeScript],
-  ["tsx", Lang.Tsx],
-  ["js", Lang.JavaScript],
-  ["javascript", Lang.JavaScript],
-  ["jsx", Lang.Tsx],
-  ["html", Lang.Html],
-  ["css", Lang.Css],
+const DYNAMIC_LANGUAGE_EXTENSIONS = new Map<string, AstLanguage>([
+  [".bash", { name: "bash", parser: "bash" }],
+  [".bats", { name: "bash", parser: "bash" }],
+  [".sh", { name: "bash", parser: "bash" }],
+  [".zsh", { name: "bash", parser: "bash" }],
+  [".c", { name: "c", parser: "c" }],
+  [".h", { name: "c", parser: "c" }],
+  [".cpp", { name: "cpp", parser: "cpp" }],
+  [".cc", { name: "cpp", parser: "cpp" }],
+  [".cxx", { name: "cpp", parser: "cpp" }],
+  [".hpp", { name: "cpp", parser: "cpp" }],
+  [".hxx", { name: "cpp", parser: "cpp" }],
+  [".go", { name: "go", parser: "go" }],
+  [".java", { name: "java", parser: "java" }],
+  [".kt", { name: "kotlin", parser: "kotlin" }],
+  [".kts", { name: "kotlin", parser: "kotlin" }],
+  [".py", { name: "python", parser: "python" }],
+  [".pyw", { name: "python", parser: "python" }],
+  [".pyi", { name: "python", parser: "python" }],
+  [".rb", { name: "ruby", parser: "ruby" }],
+  [".rs", { name: "rust", parser: "rust" }],
+  [".swift", { name: "swift", parser: "swift" }],
+  [".yaml", { name: "yaml", parser: "yaml" }],
+  [".yml", { name: "yaml", parser: "yaml" }],
+]);
+
+const LANGUAGE_ALIASES = new Map<string, AstLanguage>([
+  ["bash", { name: "bash", parser: "bash" }],
+  ["sh", { name: "bash", parser: "bash" }],
+  ["c", { name: "c", parser: "c" }],
+  ["cpp", { name: "cpp", parser: "cpp" }],
+  ["c++", { name: "cpp", parser: "cpp" }],
+  ["css", { name: "css", parser: Lang.Css }],
+  ["go", { name: "go", parser: "go" }],
+  ["html", { name: "html", parser: Lang.Html }],
+  ["java", { name: "java", parser: "java" }],
+  ["js", { name: "javascript", parser: Lang.JavaScript }],
+  ["javascript", { name: "javascript", parser: Lang.JavaScript }],
+  ["jsx", { name: "tsx", parser: Lang.Tsx }],
+  ["kotlin", { name: "kotlin", parser: "kotlin" }],
+  ["kt", { name: "kotlin", parser: "kotlin" }],
+  ["python", { name: "python", parser: "python" }],
+  ["py", { name: "python", parser: "python" }],
+  ["ruby", { name: "ruby", parser: "ruby" }],
+  ["rb", { name: "ruby", parser: "ruby" }],
+  ["rust", { name: "rust", parser: "rust" }],
+  ["rs", { name: "rust", parser: "rust" }],
+  ["swift", { name: "swift", parser: "swift" }],
+  ["ts", { name: "typescript", parser: Lang.TypeScript }],
+  ["typescript", { name: "typescript", parser: Lang.TypeScript }],
+  ["tsx", { name: "tsx", parser: Lang.Tsx }],
+  ["yaml", { name: "yaml", parser: "yaml" }],
+  ["yml", { name: "yaml", parser: "yaml" }],
 ]);
 
 type AstSearchParams = {
@@ -46,7 +119,7 @@ type AstSearchParams = {
   constraints?: Record<string, Rule>;
   utils?: Record<string, Rule>;
   path?: string;
-  language?: Lang;
+  language?: AstLanguage;
   include?: string[];
   exclude?: string[];
   context: number;
@@ -85,17 +158,15 @@ function getStringArray(value: unknown, field: string): string[] | undefined {
   return value;
 }
 
-function parseLanguage(value: unknown): Lang | undefined {
+function parseLanguage(value: unknown): AstLanguage | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new Error('ast_search field "language" must be a string.');
   const normalized = value.trim().toLowerCase();
   const language = LANGUAGE_ALIASES.get(normalized);
-  if (language === undefined) {
-    throw new Error(
-      "ast_search language must be one of: typescript, tsx, javascript, jsx, html, css.",
-    );
-  }
-  return language;
+  if (language !== undefined) return language;
+  throw new Error(
+    "ast_search language must be one of: bash, c, cpp, css, go, html, java, javascript, jsx, kotlin, python, ruby, rust, swift, typescript, tsx, yaml.",
+  );
 }
 
 type AstSearchMatcher = string | NapiConfig;
@@ -329,12 +400,20 @@ function parseParams(params: unknown): AstSearchParams {
   };
 }
 
-function detectAstLanguage(filePath: string, requested: Lang | undefined): Lang | null {
+function detectAstLanguage(
+  filePath: string,
+  requested: AstLanguage | undefined,
+): AstLanguage | null {
   if (requested !== undefined) return requested;
-  return BUILTIN_LANG_EXTENSIONS.get(extname(filePath).toLowerCase()) ?? null;
+  const extension = extname(filePath).toLowerCase();
+  const napiLanguage = NAPI_LANGUAGE_EXTENSIONS.get(extension);
+  if (napiLanguage !== undefined) return napiLanguage;
+  const dynamicLanguage = DYNAMIC_LANGUAGE_EXTENSIONS.get(extension);
+  if (dynamicLanguage !== undefined) return dynamicLanguage;
+  return null;
 }
 
-function buildAstMatcher(params: AstSearchParams, language: Lang): AstSearchMatcher {
+function buildNapiMatcher(params: AstSearchParams, language: Lang | string): AstSearchMatcher {
   if (params.rule === undefined) {
     if (params.pattern === undefined) throw new Error("ast_search matcher is missing.");
     return params.pattern;
@@ -473,8 +552,8 @@ export async function executeAstSearch(paramsInput: {
     const content = normalizeToLF(stripBom(file.text).text);
 
     try {
-      const root = parse(language, content);
-      const matcher = buildAstMatcher(params, language);
+      const root = parse(language.parser, content);
+      const matcher = buildNapiMatcher(params, language.parser);
       const nodes = root.root().findAll(matcher);
       for (const node of nodes) {
         if (matches.length >= params.limit) {
@@ -532,7 +611,7 @@ export function registerAstSearchTool(pi: ExtensionAPI): void {
     name: "ast_search",
     label: "AST Search",
     description:
-      "Search code structurally with ast-grep patterns or rule objects and return hashline-anchored matches. Supports TypeScript, TSX/JSX, JavaScript, HTML, and CSS.",
+      "Search code structurally with ast-grep patterns or rule objects and return hashline-anchored matches. Supports Bash, C, C++, CSS, Go, HTML, Java, JavaScript/JSX, Kotlin, Python, Ruby, Rust, Swift, TypeScript/TSX, and YAML.",
     promptSnippet: "Search code structurally with ast-grep patterns and anchored output",
     promptGuidelines: [
       "Use ast_search when text grep is too broad and the task needs syntax-aware matches.",
@@ -566,7 +645,10 @@ export function registerAstSearchTool(pi: ExtensionAPI): void {
           Type.String({ description: "File or directory to search; defaults to cwd" }),
         ),
         language: Type.Optional(
-          Type.String({ description: "typescript, tsx, javascript, jsx, html, or css" }),
+          Type.String({
+            description:
+              "bash, c, cpp, css, go, html, java, javascript, jsx, kotlin, python, ruby, rust, swift, typescript, tsx, or yaml",
+          }),
         ),
         include: Type.Optional(
           Type.Array(Type.String(), { description: "Glob patterns to include" }),

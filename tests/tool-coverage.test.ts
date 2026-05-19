@@ -140,6 +140,26 @@ describe("ast_search", () => {
     expect(text).not.toContain("let other = 2;");
   });
 
+  test("supports dynamic ast-grep language packages", async () => {
+    const root = await createTempRoot();
+    await writeFile(join(root, "script.py"), "def run(value):\n    return value\nrun(1)\n");
+    await writeFile(join(root, "main.rs"), "fn main() {\n    run(2);\n}\n");
+
+    const pythonResult = await executeAstSearch({
+      rawParams: { pattern: "run($ARG)", language: "python", path: "script.py" },
+      cwd: root,
+    });
+    const rustResult = await executeAstSearch({
+      rawParams: { pattern: "run($ARG)", language: "rust", path: "main.rs" },
+      cwd: root,
+    });
+
+    expect(pythonResult.details.matches).toBe(1);
+    expect(pythonResult.content[0]?.text).toContain("run(1)");
+    expect(rustResult.details.matches).toBe(1);
+    expect(rustResult.content[0]?.text).toContain("run(2);");
+  });
+
   test("rejects invalid rule objects early", async () => {
     const root = await createTempRoot();
     await writeFile(join(root, "rules.ts"), "const value = 1;\n");

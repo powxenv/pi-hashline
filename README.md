@@ -24,7 +24,7 @@ Restart Pi after installation so the replacement tools are registered.
 - Safer file edits using anchored read output
 - Anchored search results for editing matches without extra reads, with `.gitignore`, include/exclude globs, asymmetric context, and count-only mode
 - Deterministic `ls` and `.gitignore`-aware `find` for file exploration without shell noise
-- Syntax-aware `ast_search` for TypeScript, TSX/JSX, JavaScript, HTML, and CSS structural patterns, including ast-grep rule objects
+- Syntax-aware `ast_search` for Bash, C, C++, CSS, Go, HTML, Java, JavaScript/JSX, Kotlin, Python, Ruby, Rust, Swift, TypeScript/TSX, and YAML, including ast-grep rule objects
 - Write output with fresh anchors for immediate follow-up edits
 - Compact maps, symbol reads, and an `outline` tool for navigating large files without loading full contents
 - Symbol replacement for supported mapped files, with syntax-regression warnings for JS/TS edits
