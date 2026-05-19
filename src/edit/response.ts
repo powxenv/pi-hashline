@@ -7,10 +7,90 @@ type ToolResult = {
   details: Record<string, unknown>;
 };
 
+type ReturnMode = "changed" | "full" | "ranges";
+
+type ReturnRange = { start: number; end?: number };
+
+const ANCHOR_TEXT_BUDGET_BYTES = 50 * 1024;
+
 function getVisibleLines(text: string): string[] {
   if (text.length === 0) return [];
   const lines = text.split("\n");
   return text.endsWith("\n") ? lines.slice(0, -1) : lines;
+}
+
+function formatAnchorsBlock(lines: string[], start: number, end: number): string {
+  const region = lines.slice(start - 1, end);
+  const formatted = formatHashlineRegion(region, start);
+  return `--- Anchors ${start}-${end} ---\n${formatted}`;
+}
+
+function formatFullAnchors(lines: string[]): string {
+  if (lines.length === 0) {
+    return "File is empty. Use edit with prepend or append and omit pos to insert content.";
+  }
+  return formatAnchorsBlock(lines, 1, lines.length);
+}
+
+function formatRangeAnchors(lines: string[], ranges: ReturnRange[] | undefined): string {
+  if (lines.length === 0) {
+    return "File is empty. Use edit with prepend or append and omit pos to insert content.";
+  }
+  if (!ranges?.length) {
+    return "No return ranges provided. Use returnRanges with returnMode=ranges.";
+  }
+  return ranges
+    .map((range) => {
+      if (range.start > lines.length) {
+        const requestedEnd = range.end ?? range.start;
+        return `--- Anchors ${range.start}-${requestedEnd} ---\n[Range starts beyond end of file (${lines.length} lines).]`;
+      }
+      const end = Math.min(range.end ?? range.start, lines.length);
+      return formatAnchorsBlock(lines, range.start, end);
+    })
+    .join("\n\n");
+}
+
+function formatChangedAnchors(params: {
+  lines: string[];
+  firstChangedLine: number | undefined;
+  lastChangedLine: number | undefined;
+}): string {
+  if (params.lines.length === 0) {
+    return "File is empty. Use edit with prepend or append and omit pos to insert content.";
+  }
+  const anchorRange = computeAffectedLineRange({
+    firstChangedLine: params.firstChangedLine,
+    lastChangedLine: params.lastChangedLine,
+    resultLineCount: params.lines.length,
+  });
+  if (!anchorRange) {
+    return "Anchors omitted; use read for subsequent edits.";
+  }
+  return formatAnchorsBlock(params.lines, anchorRange.start, anchorRange.end);
+}
+
+function formatResponseAnchors(params: {
+  mode: ReturnMode;
+  lines: string[];
+  ranges: ReturnRange[] | undefined;
+  firstChangedLine: number | undefined;
+  lastChangedLine: number | undefined;
+}): string {
+  const block =
+    params.mode === "full"
+      ? formatFullAnchors(params.lines)
+      : params.mode === "ranges"
+        ? formatRangeAnchors(params.lines, params.ranges)
+        : formatChangedAnchors({
+            lines: params.lines,
+            firstChangedLine: params.firstChangedLine,
+            lastChangedLine: params.lastChangedLine,
+          });
+
+  return Buffer.byteLength(block, "utf8") <= ANCHOR_TEXT_BUDGET_BYTES
+    ? block
+    : "Anchors omitted because the requested response is too large; use read with offset/limit for subsequent edits.";
 }
 
 export function buildNoopResponse(params: {
@@ -44,31 +124,18 @@ export function buildChangedResponse(params: {
   snapshotId: string;
   warnings: string[] | undefined;
   compatibilityDetails: Record<string, unknown> | undefined;
+  returnMode: ReturnMode;
+  returnRanges: ReturnRange[] | undefined;
 }): ToolResult {
-  const CHANGED_ANCHOR_TEXT_BUDGET_BYTES = 50 * 1024;
   const diffResult = generateDiffString(params.originalNormalized, params.result);
   const resultLines = getVisibleLines(params.result);
-  const anchorRange = computeAffectedLineRange({
+  const anchorsBlock = formatResponseAnchors({
+    mode: params.returnMode,
+    lines: resultLines,
+    ranges: params.returnRanges,
     firstChangedLine: params.firstChangedLine,
     lastChangedLine: params.lastChangedLine,
-    resultLineCount: resultLines.length,
   });
-
-  let anchorsBlock: string;
-  if (anchorRange) {
-    const region = resultLines.slice(anchorRange.start - 1, anchorRange.end);
-    const formatted = formatHashlineRegion(region, anchorRange.start);
-    const block = `--- Anchors ${anchorRange.start}-${anchorRange.end} ---\n${formatted}`;
-    anchorsBlock =
-      Buffer.byteLength(block, "utf8") <= CHANGED_ANCHOR_TEXT_BUDGET_BYTES
-        ? block
-        : "Anchors omitted; use read for subsequent edits.";
-  } else if (resultLines.length === 0) {
-    anchorsBlock = "File is empty. Use edit with prepend or append and omit pos to insert content.";
-  } else {
-    anchorsBlock = "Anchors omitted; use read for subsequent edits.";
-  }
-
   const warningsBlock = params.warnings?.length
     ? `\n\nWarnings:\n${params.warnings.join("\n")}`
     : "";
@@ -83,7 +150,7 @@ export function buildChangedResponse(params: {
       ...(params.compatibilityDetails ? { compatibility: params.compatibilityDetails } : {}),
       metrics: {
         classification: "applied" as const,
-        return_mode: "changed" as const,
+        return_mode: params.returnMode,
         added_lines: countDiffLines(diffResult.diff, "+"),
         removed_lines: countDiffLines(diffResult.diff, "-"),
       },

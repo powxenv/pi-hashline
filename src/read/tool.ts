@@ -113,7 +113,11 @@ export function registerReadTool(pi: ExtensionAPI): void {
         Type.Integer({ minimum: 1, description: "Maximum number of lines to read" }),
       ),
       map: Type.Optional(Type.Boolean({ description: "Append a structural file map" })),
-      symbol: Type.Optional(Type.String({ description: "Symbol name to read, optionally qualified or suffixed with @line" })),
+      symbol: Type.Optional(
+        Type.String({
+          description: "Symbol name to read, optionally qualified or suffixed with @line",
+        }),
+      ),
     }),
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -169,7 +173,13 @@ export function registerReadTool(pi: ExtensionAPI): void {
         });
       }
 
-      if (params.map === true || (!params.offset && !params.limit && params.symbol === undefined && stats.size > DEFAULT_MAX_BYTES)) {
+      if (
+        params.map === true ||
+        (!params.offset &&
+          !params.limit &&
+          params.symbol === undefined &&
+          stats.size > DEFAULT_MAX_BYTES)
+      ) {
         const fileMap = await getCachedFileMap({
           filePath: absolutePath,
           content: normalized,

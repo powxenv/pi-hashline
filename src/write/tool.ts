@@ -19,7 +19,8 @@ export function registerWriteTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "write",
     label: "Write",
-    description: "Create or overwrite a UTF-8 text file. Parent directories are created automatically. The result returns fresh LINE#HASH anchors for follow-up edits.",
+    description:
+      "Create or overwrite a UTF-8 text file. Parent directories are created automatically. The result returns fresh LINE#HASH anchors for follow-up edits.",
     promptSnippet: WRITE_PROMPT_SNIPPET,
     promptGuidelines: WRITE_PROMPT_GUIDELINES,
     parameters: Type.Object(

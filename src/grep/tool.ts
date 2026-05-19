@@ -153,7 +153,10 @@ function formatMatches(matches: GrepMatch[], truncated: boolean): string {
   });
 
   if (truncated) {
-    lines.push("", `[Search stopped after ${DEFAULT_MAX_MATCHES} matches. Narrow the path or pattern for more precise results.]`);
+    lines.push(
+      "",
+      `[Search stopped after ${DEFAULT_MAX_MATCHES} matches. Narrow the path or pattern for more precise results.]`,
+    );
   }
 
   return lines.join("\n");
@@ -169,7 +172,8 @@ function parseParams(params: unknown): GrepSearchParams {
     pattern: params["pattern"],
     path: typeof params["path"] === "string" ? params["path"] : undefined,
     literal: typeof params["literal"] === "boolean" ? params["literal"] : undefined,
-    caseSensitive: typeof params["caseSensitive"] === "boolean" ? params["caseSensitive"] : undefined,
+    caseSensitive:
+      typeof params["caseSensitive"] === "boolean" ? params["caseSensitive"] : undefined,
     context: getInteger(params["context"], DEFAULT_CONTEXT_LINES, 0, 20),
     maxMatches: getInteger(params["maxMatches"], DEFAULT_MAX_MATCHES, 1, 1000),
   };
@@ -179,17 +183,28 @@ export function registerGrepTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "grep",
     label: "Grep",
-    description: "Search text files and return hashline-anchored matches. Directories are searched recursively while common dependency/build directories are skipped.",
+    description:
+      "Search text files and return hashline-anchored matches. Directories are searched recursively while common dependency/build directories are skipped.",
     promptSnippet: GREP_PROMPT_SNIPPET,
     promptGuidelines: GREP_PROMPT_GUIDELINES,
     parameters: Type.Object(
       {
         pattern: Type.String({ description: "Text or regex pattern to search for" }),
-        path: Type.Optional(Type.String({ description: "File or directory to search; defaults to cwd" })),
-        literal: Type.Optional(Type.Boolean({ description: "Treat pattern as literal text. Defaults to true" })),
-        caseSensitive: Type.Optional(Type.Boolean({ description: "Use case-sensitive matching. Defaults to false" })),
-        context: Type.Optional(Type.Integer({ minimum: 0, maximum: 20, description: "Context lines around each match" })),
-        maxMatches: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Maximum matching lines" })),
+        path: Type.Optional(
+          Type.String({ description: "File or directory to search; defaults to cwd" }),
+        ),
+        literal: Type.Optional(
+          Type.Boolean({ description: "Treat pattern as literal text. Defaults to true" }),
+        ),
+        caseSensitive: Type.Optional(
+          Type.Boolean({ description: "Use case-sensitive matching. Defaults to false" }),
+        ),
+        context: Type.Optional(
+          Type.Integer({ minimum: 0, maximum: 20, description: "Context lines around each match" }),
+        ),
+        maxMatches: Type.Optional(
+          Type.Integer({ minimum: 1, maximum: 1000, description: "Maximum matching lines" }),
+        ),
       },
       { additionalProperties: false },
     ),

@@ -2,24 +2,24 @@
   "name": "pi-hashline",
   "version": "0.1.0",
   "description": "Pi extension for hashline-anchored reads, search, edits, file maps, and shell compaction",
-  "type": "module",
-  "module": "index.ts",
-  "exports": {
-    ".": "./index.ts"
-  },
-  "license": "MIT",
   "keywords": [
-    "pi-package",
-    "pi-extension",
+    "code-map",
     "hashline",
-    "code-map"
+    "pi-extension",
+    "pi-package"
   ],
+  "license": "MIT",
   "files": [
     "index.ts",
     "src/",
     "README.md",
     "LICENSE"
   ],
+  "type": "module",
+  "module": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "test": "bun test",

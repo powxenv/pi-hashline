@@ -46,7 +46,11 @@ function indexSymbols(symbols: FileSymbol[], parentName?: string): IndexedSymbol
 }
 
 function lineMatches(symbol: FileSymbol, line: number | undefined): boolean {
-  return line === undefined || symbol.startLine === line || (line >= symbol.startLine && line <= symbol.endLine);
+  return (
+    line === undefined ||
+    symbol.startLine === line ||
+    (line >= symbol.startLine && line <= symbol.endLine)
+  );
 }
 
 function scoreCandidate(candidate: IndexedSymbol, query: string): number {
@@ -97,7 +101,10 @@ export function lookupSymbol(fileMap: FileMap, query: string): SymbolLookupResul
     return { type: "found", symbol: match.symbol, qualifiedName: match.qualifiedName };
   }
 
-  if (fuzzyMatches.length > 1 && scoreCandidate(fuzzyMatches[0]!, parsed.name) < scoreCandidate(fuzzyMatches[1]!, parsed.name)) {
+  if (
+    fuzzyMatches.length > 1 &&
+    scoreCandidate(fuzzyMatches[0]!, parsed.name) < scoreCandidate(fuzzyMatches[1]!, parsed.name)
+  ) {
     const match = fuzzyMatches[0]!;
     return { type: "found", symbol: match.symbol, qualifiedName: match.qualifiedName };
   }
@@ -109,10 +116,14 @@ export function lookupSymbol(fileMap: FileMap, query: string): SymbolLookupResul
   return { type: "not-found", candidates: indexed.slice(0, 12) };
 }
 
-export function formatSymbolLookupFailure(query: string, result: Exclude<SymbolLookupResult, { type: "found" }>): string {
+export function formatSymbolLookupFailure(
+  query: string,
+  result: Exclude<SymbolLookupResult, { type: "found" }>,
+): string {
   if (result.type === "ambiguous") {
     const lines = result.matches.map(
-      (match) => `${match.qualifiedName} (${match.symbol.kind}, lines ${match.symbol.startLine}-${match.symbol.endLine})`,
+      (match) =>
+        `${match.qualifiedName} (${match.symbol.kind}, lines ${match.symbol.startLine}-${match.symbol.endLine})`,
     );
     return `Symbol "${query}" is ambiguous. Use a qualified name or append @line.\n${lines.join("\n")}`;
   }
@@ -122,7 +133,8 @@ export function formatSymbolLookupFailure(query: string, result: Exclude<SymbolL
   }
 
   const lines = result.candidates.map(
-    (candidate) => `${candidate.qualifiedName} (${candidate.symbol.kind}, lines ${candidate.symbol.startLine}-${candidate.symbol.endLine})`,
+    (candidate) =>
+      `${candidate.qualifiedName} (${candidate.symbol.kind}, lines ${candidate.symbol.startLine}-${candidate.symbol.endLine})`,
   );
   return `Symbol "${query}" was not found. Available symbols include:\n${lines.join("\n")}`;
 }

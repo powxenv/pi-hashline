@@ -19,9 +19,7 @@ describe("hashline editing", () => {
 
   test("replaces one anchored line", () => {
     const content = "alpha\nbeta\ngamma\n";
-    const edits = resolveEditAnchors([
-      { op: "replace", pos: anchor(2, "beta"), lines: ["BETA"] },
-    ]);
+    const edits = resolveEditAnchors([{ op: "replace", pos: anchor(2, "beta"), lines: ["BETA"] }]);
     const result = applyHashlineEdits(content, edits);
     expect(result.content).toBe("alpha\nBETA\ngamma\n");
     expect(result.firstChangedLine).toBe(2);
@@ -65,9 +63,18 @@ describe("hashline editing", () => {
   });
 
   test("replace_text requires a unique match", () => {
-    const edits = resolveEditAnchors([
-      { op: "replace_text", oldText: "same", newText: "new" },
-    ]);
+    const edits = resolveEditAnchors([{ op: "replace_text", oldText: "same", newText: "new" }]);
     expect(() => applyHashlineEdits("same\nsame\n", edits)).toThrow("[E_MULTI_MATCH]");
+  });
+
+  test("warns when a replacement repeats the next surviving line", () => {
+    const content = "alpha\nbeta\ngamma\n";
+    const edits = resolveEditAnchors([
+      { op: "replace", pos: anchor(2, "beta"), lines: ["BETA", "gamma"] },
+    ]);
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.content).toBe("alpha\nBETA\ngamma\ngamma\n");
+    expect(result.warnings?.[0]).toContain("Potential boundary duplication");
   });
 });

@@ -55,7 +55,11 @@ describe("file maps", () => {
       "  }",
       "}",
     ].join("\n");
-    const map = generateMap(duplicateSource, "duplicate.ts", Buffer.byteLength(duplicateSource, "utf8"));
+    const map = generateMap(
+      duplicateSource,
+      "duplicate.ts",
+      Buffer.byteLength(duplicateSource, "utf8"),
+    );
     expect(map).not.toBeNull();
     const ambiguous = lookupSymbol(map!, "run");
     expect(ambiguous.type).toBe("ambiguous");

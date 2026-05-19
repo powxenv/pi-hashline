@@ -21,11 +21,13 @@ import { writeFileAtomically } from "../shared/fs-write";
 import { getCachedFileMap } from "../filemap/cache";
 import { formatSymbolLookupFailure, lookupSymbol } from "../filemap/symbols";
 
-const EDIT_PROMPT_SNIPPET = `Edit a text file via LINE#HASH anchors from read`;
+const EDIT_PROMPT_SNIPPET = `Edit a text file via LINE#HASH anchors copied from read`;
 
 const EDIT_PROMPT_GUIDELINES = [
   "Always read a file before editing it to get current LINE#HASH anchors.",
-  "Copy anchors verbatim from read output — do not guess or construct them.",
+  "Every item in edits should include an op: replace, append, prepend, replace_text, or replace_symbol.",
+  "For exact text replacement, use op=replace_text with both oldText and newText; do not send oldText/newText by themselves.",
+  "Copy anchors verbatim from read output — do not guess, renumber, shift, or construct anchors.",
   "Submit all edits for one file in a single edits array.",
   "Use replace_text only when a match is guaranteed unique; otherwise read first and use anchors.",
 ];
@@ -46,17 +48,11 @@ const returnRangeSchema = Type.Object(
 
 const hashlineEditItemSchema = Type.Object(
   {
-    op: Type.Union(
-      [
-        Type.Literal("replace"),
-        Type.Literal("append"),
-        Type.Literal("prepend"),
-        Type.Literal("replace_text"),
-        Type.Literal("replace_symbol"),
-      ],
-      {
-        description: 'edit operation: "replace", "append", "prepend", "replace_text", or "replace_symbol"',
-      },
+    op: Type.Optional(
+      Type.String({
+        description:
+          'Required edit operation: "replace", "append", "prepend", "replace_text", or "replace_symbol"',
+      }),
     ),
     pos: Type.Optional(Type.String({ description: "anchor" })),
     end: Type.Optional(Type.String({ description: "limit position" })),
@@ -86,11 +82,23 @@ const hashlineEditToolSchema = Type.Object(
   { additionalProperties: false },
 );
 
+type CanonicalEditOp = "replace" | "append" | "prepend" | "replace_text" | "replace_symbol";
+
 type EditRequestParams = {
   path: string;
   returnMode?: "changed" | "full" | "ranges";
   returnRanges?: Array<{ start: number; end?: number }>;
   edits: HashlineToolEdit[];
+};
+
+type RawHashlineToolEdit = {
+  op?: string;
+  pos?: string;
+  end?: string;
+  lines?: string[] | string | null;
+  oldText?: string;
+  newText?: string;
+  symbol?: string;
 };
 
 const ROOT_KEYS = new Set(["path", "returnMode", "returnRanges", "edits"]);
@@ -108,7 +116,238 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function assertEditRequest(request: unknown): asserts request is EditRequestParams {
+function readOptionalString(
+  source: Record<string, unknown>,
+  key: string,
+  message: string,
+  options: { trim?: boolean; allowEmpty?: boolean } = {},
+): string | undefined {
+  if (!hasOwn(source, key)) return undefined;
+  const value = source[key];
+  if (typeof value !== "string") {
+    throw new Error(message);
+  }
+  const finalValue = options.trim === true ? value.trim() : value;
+  if (options.allowEmpty === false && finalValue.length === 0) {
+    throw new Error(message.replace("must be a string", "must be a non-empty string"));
+  }
+  return finalValue;
+}
+
+function readOptionalLines(
+  source: Record<string, unknown>,
+  index: number,
+): string[] | string | null | undefined {
+  if (!hasOwn(source, "lines")) return undefined;
+  const value = source["lines"];
+  if (value !== null && typeof value !== "string" && !isStringArray(value)) {
+    throw new Error(`Edit ${index} field "lines" must be a string array, string, or null.`);
+  }
+  return value;
+}
+
+function normalizeOperationKey(op: string): string {
+  return op.trim().replaceAll("-", "_").replaceAll(" ", "_").toLowerCase();
+}
+
+function isDeleteOperationAlias(op: string): boolean {
+  const key = normalizeOperationKey(op);
+  return key === "delete" || key === "remove";
+}
+
+function normalizeExplicitOperation(op: string, index: number): CanonicalEditOp {
+  const normalized = op.trim();
+  if (normalized.length === 0) {
+    throw new Error(`Edit ${index} requires a non-empty "op" string.`);
+  }
+
+  const key = normalizeOperationKey(normalized);
+  if (key === "replacetext") return "replace_text";
+  if (key === "replace_symbol" || key === "replacesymbol") return "replace_symbol";
+  if (key === "delete" || key === "remove") return "replace";
+  if (key === "replace" || key === "append" || key === "prepend" || key === "replace_text") {
+    return key;
+  }
+
+  throw new Error(
+    `Edit ${index} uses unknown op "${op}". Expected "replace", "append", "prepend", "replace_text", or "replace_symbol".`,
+  );
+}
+
+function inferMissingOperation(edit: RawHashlineToolEdit, index: number): CanonicalEditOp {
+  const hasExactTextFields = edit.oldText !== undefined || edit.newText !== undefined;
+  if (hasExactTextFields) {
+    if (edit.oldText !== undefined && edit.newText !== undefined) {
+      return "replace_text";
+    }
+    throw new Error(
+      `Edit ${index} omits "op" and has an incomplete exact text replacement. Use { "op": "replace_text", "oldText": "...", "newText": "..." }.`,
+    );
+  }
+
+  if (edit.symbol !== undefined) {
+    return "replace_symbol";
+  }
+
+  if (edit.pos !== undefined && edit.lines !== undefined) {
+    return "replace";
+  }
+
+  throw new Error(
+    `Edit ${index} requires an "op" field. Use "replace" with pos/lines, "append" or "prepend" with lines, "replace_text" with oldText/newText, or "replace_symbol" with symbol/lines.`,
+  );
+}
+
+function buildRawEditItem(edit: Record<string, unknown>, index: number): RawHashlineToolEdit {
+  const raw: RawHashlineToolEdit = {};
+  const op = readOptionalString(edit, "op", `Edit ${index} field "op" must be a string.`, {
+    trim: true,
+    allowEmpty: false,
+  });
+  const pos = readOptionalString(edit, "pos", `Edit ${index} field "pos" must be a string.`);
+  const end = readOptionalString(edit, "end", `Edit ${index} field "end" must be a string.`);
+  const oldText = readOptionalString(
+    edit,
+    "oldText",
+    `Edit ${index} field "oldText" must be a string.`,
+  );
+  const newText = readOptionalString(
+    edit,
+    "newText",
+    `Edit ${index} field "newText" must be a string.`,
+  );
+  const symbol = readOptionalString(
+    edit,
+    "symbol",
+    `Edit ${index} field "symbol" must be a string.`,
+  );
+  const lines = readOptionalLines(edit, index);
+
+  if (op !== undefined) raw.op = op;
+  if (pos !== undefined) raw.pos = pos;
+  if (end !== undefined) raw.end = end;
+  if (oldText !== undefined) raw.oldText = oldText;
+  if (newText !== undefined) raw.newText = newText;
+  if (symbol !== undefined) raw.symbol = symbol;
+  if (lines !== undefined) raw.lines = lines;
+  return raw;
+}
+
+function normalizeEditItem(edit: Record<string, unknown>, index: number): HashlineToolEdit {
+  const unknownItemKeys = Object.keys(edit).filter((key) => !ITEM_KEYS.has(key));
+  if (unknownItemKeys.length > 0) {
+    throw new Error(`Edit ${index} contains unknown fields: ${unknownItemKeys.join(", ")}.`);
+  }
+
+  const raw = buildRawEditItem(edit, index);
+  const deleteAlias = raw.op !== undefined && isDeleteOperationAlias(raw.op);
+  const op =
+    raw.op === undefined
+      ? inferMissingOperation(raw, index)
+      : normalizeExplicitOperation(raw.op, index);
+
+  if (op === "replace_text") {
+    if (typeof raw.oldText !== "string" || typeof raw.newText !== "string") {
+      throw new Error(`Edit ${index} with op "replace_text" requires "oldText" and "newText".`);
+    }
+    if (
+      raw.pos !== undefined ||
+      raw.end !== undefined ||
+      raw.lines !== undefined ||
+      raw.symbol !== undefined
+    ) {
+      throw new Error(
+        `Edit ${index} with op "replace_text" only supports "oldText" and "newText".`,
+      );
+    }
+    return { op, oldText: raw.oldText, newText: raw.newText };
+  }
+
+  if (op === "replace_symbol") {
+    if (typeof raw.symbol !== "string" || raw.symbol.trim().length === 0) {
+      throw new Error(`Edit ${index} with op "replace_symbol" requires a non-empty "symbol".`);
+    }
+    if (raw.lines === undefined) {
+      throw new Error(`Edit ${index} with op "replace_symbol" requires a "lines" field.`);
+    }
+    if (
+      raw.pos !== undefined ||
+      raw.end !== undefined ||
+      raw.oldText !== undefined ||
+      raw.newText !== undefined
+    ) {
+      throw new Error(`Edit ${index} with op "replace_symbol" only supports "symbol" and "lines".`);
+    }
+    return { op, symbol: raw.symbol, lines: raw.lines };
+  }
+
+  if (deleteAlias && raw.lines !== undefined && raw.lines !== null) {
+    if (!Array.isArray(raw.lines) || raw.lines.length > 0) {
+      throw new Error(
+        `Edit ${index} with op "${raw.op}" removes content and does not accept replacement lines.`,
+      );
+    }
+  }
+  if (raw.lines === undefined) {
+    if (deleteAlias && op === "replace") {
+      raw.lines = null;
+    } else {
+      throw new Error(`Edit ${index} with op "${op}" requires a "lines" field.`);
+    }
+  }
+  if (raw.oldText !== undefined || raw.newText !== undefined) {
+    throw new Error(`Edit ${index} with op "${op}" does not support "oldText" or "newText".`);
+  }
+  if (raw.symbol !== undefined) {
+    throw new Error(`Edit ${index} with op "${op}" does not support "symbol".`);
+  }
+  if (op === "replace" && typeof raw.pos !== "string") {
+    throw new Error(`Edit ${index} with op "replace" requires a "pos" anchor.`);
+  }
+  if ((op === "append" || op === "prepend") && raw.end !== undefined) {
+    throw new Error(`Edit ${index} with op "${op}" does not support "end".`);
+  }
+
+  return {
+    op,
+    ...(raw.pos !== undefined ? { pos: raw.pos } : {}),
+    ...(raw.end !== undefined ? { end: raw.end } : {}),
+    lines: raw.lines,
+  };
+}
+
+function normalizeReturnRanges(
+  request: Record<string, unknown>,
+): Array<{ start: number; end?: number }> | undefined {
+  if (!hasOwn(request, "returnRanges")) return undefined;
+  const ranges = request["returnRanges"];
+  if (!Array.isArray(ranges) || ranges.length === 0) {
+    throw new Error('Edit request field "returnRanges" must be a non-empty array when provided.');
+  }
+
+  return ranges.map((range, index) => {
+    if (!isRecord(range)) {
+      throw new Error(`returnRanges[${index}] must be an object.`);
+    }
+    const startValue = range["start"];
+    if (typeof startValue !== "number" || !Number.isInteger(startValue) || startValue < 1) {
+      throw new Error(`returnRanges[${index}].start must be a positive integer.`);
+    }
+    const endValue = range["end"];
+    if (endValue !== undefined) {
+      if (typeof endValue !== "number" || !Number.isInteger(endValue) || endValue < 1) {
+        throw new Error(`returnRanges[${index}].end must be a positive integer when provided.`);
+      }
+      if (endValue < startValue) {
+        throw new Error(`returnRanges[${index}].end must be >= start.`);
+      }
+      return { start: startValue, end: endValue };
+    }
+    return { start: startValue };
+  });
+}
+
+export function parseEditRequest(request: unknown): EditRequestParams {
   if (!isRecord(request)) {
     throw new Error("Edit request must be an object.");
   }
@@ -118,148 +357,53 @@ function assertEditRequest(request: unknown): asserts request is EditRequestPara
     throw new Error(`Edit request contains unknown fields: ${unknownRootKeys.join(", ")}.`);
   }
 
-  if (typeof request["path"] !== "string" || (request["path"] as string).length === 0) {
+  const path = request["path"];
+  if (typeof path !== "string" || path.length === 0) {
     throw new Error('Edit request requires a non-empty "path" string.');
   }
 
-  if (!Array.isArray(request["edits"]) || (request["edits"] as unknown[]).length === 0) {
+  const editsInput = request["edits"];
+  if (!Array.isArray(editsInput) || editsInput.length === 0) {
     throw new Error('Edit request requires a non-empty "edits" array.');
   }
 
-  if (hasOwn(request, "returnMode")) {
-    const rm = request["returnMode"];
-    if (rm !== "changed" && rm !== "full" && rm !== "ranges") {
-      throw new Error('Edit request field "returnMode" must be "changed", "full", or "ranges".');
-    }
+  const returnModeInput = request["returnMode"];
+  const returnMode =
+    returnModeInput === undefined
+      ? undefined
+      : returnModeInput === "changed" || returnModeInput === "full" || returnModeInput === "ranges"
+        ? returnModeInput
+        : undefined;
+  if (hasOwn(request, "returnMode") && returnMode === undefined) {
+    throw new Error('Edit request field "returnMode" must be "changed", "full", or "ranges".');
   }
 
-  if (hasOwn(request, "returnRanges")) {
-    if (
-      !Array.isArray(request["returnRanges"]) ||
-      (request["returnRanges"] as unknown[]).length === 0
-    ) {
-      throw new Error('Edit request field "returnRanges" must be a non-empty array when provided.');
-    }
-    for (const [index, range] of (request["returnRanges"] as unknown[]).entries()) {
-      if (!isRecord(range)) {
-        throw new Error(`returnRanges[${index}] must be an object.`);
-      }
-      if (!Number.isInteger(range["start"]) || (range["start"] as number) < 1) {
-        throw new Error(`returnRanges[${index}].start must be a positive integer.`);
-      }
-      if (hasOwn(range, "end")) {
-        if (!Number.isInteger(range["end"]) || (range["end"] as number) < 1) {
-          throw new Error(`returnRanges[${index}].end must be a positive integer when provided.`);
-        }
-        if ((range["end"] as number) < (range["start"] as number)) {
-          throw new Error(`returnRanges[${index}].end must be >= start.`);
-        }
-      }
-    }
-  }
-
-  if (request["returnMode"] === "ranges") {
-    if (
-      !Array.isArray(request["returnRanges"]) ||
-      (request["returnRanges"] as unknown[]).length === 0
-    ) {
+  const returnRanges = normalizeReturnRanges(request);
+  if (returnMode === "ranges") {
+    if (returnRanges === undefined) {
       throw new Error(
         'Edit request with returnMode "ranges" requires a non-empty "returnRanges" array.',
       );
     }
-  } else if (hasOwn(request, "returnRanges")) {
+  } else if (returnRanges !== undefined) {
     throw new Error(
       'Edit request field "returnRanges" is only supported when returnMode is "ranges".',
     );
   }
 
-  for (const [index, edit] of (request["edits"] as unknown[]).entries()) {
+  const edits = editsInput.map((edit, index) => {
     if (!isRecord(edit)) {
       throw new Error(`Edit ${index} must be an object.`);
     }
+    return normalizeEditItem(edit, index);
+  });
 
-    const unknownItemKeys = Object.keys(edit).filter((key) => !ITEM_KEYS.has(key));
-    if (unknownItemKeys.length > 0) {
-      throw new Error(`Edit ${index} contains unknown fields: ${unknownItemKeys.join(", ")}.`);
-    }
-
-    if (typeof edit["op"] !== "string") {
-      throw new Error(`Edit ${index} requires an "op" string.`);
-    }
-    if (
-      edit["op"] !== "replace" &&
-      edit["op"] !== "append" &&
-      edit["op"] !== "prepend" &&
-      edit["op"] !== "replace_text" &&
-      edit["op"] !== "replace_symbol"
-    ) {
-      throw new Error(`Edit ${index} uses unknown op "${edit["op"]}".`);
-    }
-
-    if (hasOwn(edit, "pos") && typeof edit["pos"] !== "string") {
-      throw new Error(`Edit ${index} field "pos" must be a string.`);
-    }
-    if (hasOwn(edit, "end") && typeof edit["end"] !== "string") {
-      throw new Error(`Edit ${index} field "end" must be a string.`);
-    }
-    if (hasOwn(edit, "oldText") && typeof edit["oldText"] !== "string") {
-      throw new Error(`Edit ${index} field "oldText" must be a string.`);
-    }
-    if (hasOwn(edit, "newText") && typeof edit["newText"] !== "string") {
-      throw new Error(`Edit ${index} field "newText" must be a string.`);
-    }
-    if (hasOwn(edit, "symbol") && typeof edit["symbol"] !== "string") {
-      throw new Error(`Edit ${index} field "symbol" must be a string.`);
-    }
-    if (
-      hasOwn(edit, "lines") &&
-      edit["lines"] !== null &&
-      typeof edit["lines"] !== "string" &&
-      !isStringArray(edit["lines"])
-    ) {
-      throw new Error(`Edit ${index} field "lines" must be a string array, string, or null.`);
-    }
-
-    if (edit["op"] === "replace_text") {
-      if (typeof edit["oldText"] !== "string" || typeof edit["newText"] !== "string") {
-        throw new Error(`Edit ${index} with op "replace_text" requires "oldText" and "newText".`);
-      }
-      if (hasOwn(edit, "pos") || hasOwn(edit, "end") || hasOwn(edit, "lines")) {
-        throw new Error(
-          `Edit ${index} with op "replace_text" only supports "oldText" and "newText".`,
-        );
-      }
-      continue;
-    }
-
-    if (edit["op"] === "replace_symbol") {
-      if (typeof edit["symbol"] !== "string" || edit["symbol"].trim().length === 0) {
-        throw new Error(`Edit ${index} with op "replace_symbol" requires a non-empty "symbol".`);
-      }
-      if (!hasOwn(edit, "lines")) {
-        throw new Error(`Edit ${index} with op "replace_symbol" requires a "lines" field.`);
-      }
-      if (hasOwn(edit, "pos") || hasOwn(edit, "end") || hasOwn(edit, "oldText") || hasOwn(edit, "newText")) {
-        throw new Error(`Edit ${index} with op "replace_symbol" only supports "symbol" and "lines".`);
-      }
-      continue;
-    }
-
-    if (!hasOwn(edit, "lines")) {
-      throw new Error(`Edit ${index} requires a "lines" field.`);
-    }
-    if (hasOwn(edit, "oldText") || hasOwn(edit, "newText")) {
-      throw new Error(
-        `Edit ${index} with op "${edit["op"]}" does not support "oldText" or "newText".`,
-      );
-    }
-    if (edit["op"] === "replace" && typeof edit["pos"] !== "string") {
-      throw new Error(`Edit ${index} with op "replace" requires a "pos" anchor.`);
-    }
-    if ((edit["op"] === "append" || edit["op"] === "prepend") && hasOwn(edit, "end")) {
-      throw new Error(`Edit ${index} with op "${edit["op"]}" does not support "end".`);
-    }
-  }
+  return {
+    path,
+    ...(returnMode !== undefined ? { returnMode } : {}),
+    ...(returnRanges !== undefined ? { returnRanges } : {}),
+    edits,
+  };
 }
 
 async function resolveStructuralEditOperations(params: {
@@ -316,7 +460,7 @@ export function registerEditTool(pi: ExtensionAPI): void {
 Submit one edit call per file. All operations for that file go in a single edits array; anchors within one call must all come from the same pre-edit read.
 
 Ops:
-- replace — replace the line at pos, or the inclusive range pos..end, with lines.
+- replace — replace the line at pos, or the inclusive range pos..end, with lines. Use lines:null or lines:[] to delete.
 - append — insert lines after pos; omit pos to append at EOF.
 - prepend — insert lines before pos; omit pos to insert at BOF.
 - replace_text — replace the one exact unique occurrence of oldText with newText. Only when a match is guaranteed unique; otherwise read first and use anchors.
@@ -328,6 +472,7 @@ Example:
 ] }
 
 Rules:
+- Every edit object must include op. Do not send oldText/newText alone; use op:"replace_text".
 - lines is literal file content: no LINE#HASH: prefix, no leading +/-. Match indentation exactly.
 - Do not guess, shift, or construct anchors. Copy them from the most recent read of this file.
 - Do not emit overlapping or adjacent edits — merge them into one.
@@ -340,11 +485,9 @@ Errors come back as text starting with a bracketed code (e.g. [E_STALE_ANCHOR], 
     parameters: hashlineEditToolSchema,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      assertEditRequest(params);
-
-      const normalizedParams = params as EditRequestParams;
+      const normalizedParams = parseEditRequest(params);
       const absolutePath = resolveToCwd(normalizedParams.path, ctx.cwd);
-      const toolEdits = normalizedParams.edits as HashlineToolEdit[];
+      const toolEdits = normalizedParams.edits;
 
       return withFileMutationQueue(absolutePath, async () => {
         throwIfAborted(signal);
@@ -405,6 +548,8 @@ Errors come back as text starting with a bracketed code (e.g. [E_STALE_ANCHOR], 
           snapshotId: updatedSnapshotId,
           warnings: editResult.warnings,
           compatibilityDetails: undefined,
+          returnMode: normalizedParams.returnMode ?? "changed",
+          returnRanges: normalizedParams.returnRanges,
         });
       });
     },
