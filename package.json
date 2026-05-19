@@ -1,0 +1,58 @@
+{
+  "name": "pi-hashline",
+  "version": "0.1.0",
+  "description": "Pi extension for hashline-anchored reads, search, edits, file maps, and shell compaction",
+  "type": "module",
+  "module": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "hashline",
+    "code-map"
+  ],
+  "files": [
+    "index.ts",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:fix": "oxfmt --fix",
+    "knip": "knip"
+  },
+  "dependencies": {
+    "diff": "^9.0.0",
+    "file-type": "^22.0.1",
+    "oxc-parser": "^0.132.0",
+    "typebox": "^1.1.38",
+    "xxhashjs": "^0.2.2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.3",
+    "@types/bun": "latest",
+    "@types/node": "^25.9.0",
+    "@types/xxhashjs": "^0.2.4",
+    "@typescript/native-preview": "^7.0.0-dev.20260518.1",
+    "knip": "^6.14.1",
+    "oxfmt": "^0.50.0",
+    "oxlint": "^1.65.0",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.75.0"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
