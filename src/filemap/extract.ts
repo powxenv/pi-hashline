@@ -67,15 +67,6 @@ function extractOxcTsJs(
     });
 
     const symbols: FileSymbol[] = [];
-    const imports: string[] = [];
-
-    for (const importDecl of result.module.staticImports) {
-      const source = importDecl.moduleRequest.value;
-      if (source && !imports.includes(source)) {
-        imports.push(source);
-      }
-    }
-
     const programValue: unknown = result.program;
     const bodyValue = isRecord(programValue) ? programValue["body"] : undefined;
     const body: AstNode[] = Array.isArray(bodyValue) ? bodyValue.filter(isAstNode) : [];
@@ -92,9 +83,6 @@ function extractOxcTsJs(
       }
     }
 
-    if (imports.length > 0 && symbols.length > 0) {
-      symbols[0]!.modifiers = [...(symbols[0]!.modifiers ?? []), `imports: ${imports.join(", ")}`];
-    }
 
     return symbols.length > 0 ? symbols : null;
   } catch {
@@ -116,7 +104,6 @@ function extractTsNode(node: AstNode, content: string): FileSymbol | FileSymbol[
       const generator = node.generator === true;
       const params = extractParams(node, content);
       const mods: string[] = [];
-      if (async) mods.push("async");
       if (generator) mods.push("generator");
       return {
         name,
@@ -280,6 +267,31 @@ function extractClassMember(node: AstNode, content: string, _className: string):
   return null;
 }
 
+function extractParamName(param: AstNode, content: string): string {
+  if (param.type === "Identifier") {
+    const name = getStringProperty(param, "name");
+    return name ?? content.slice(param.start, param.end);
+  }
+  if (param.type === "AssignmentPattern") {
+    const left = getAstNodeProperty(param, "left");
+    if (left) return extractParamName(left, content);
+  }
+  if (param.type === "RestElement") {
+    const argument = getAstNodeProperty(param, "argument");
+    if (argument && isAstNode(argument)) {
+      return `...${extractParamName(argument, content)}`;
+    }
+  }
+  if (param.type === "ObjectPattern" || param.type === "ArrayPattern") {
+    return content.slice(param.start, param.end);
+  }
+  if (param.type === "TSParameterProperty") {
+    const parameter = getAstNodeProperty(param, "parameter");
+    if (parameter) return extractParamName(parameter, content);
+  }
+  return content.slice(param.start, param.end);
+}
+
 function extractParams(node: AstNode, content: string): string {
   const params = getAstNodeArrayProperty(node, "params");
   if (params.length === 0) return "";
@@ -287,7 +299,7 @@ function extractParams(node: AstNode, content: string): string {
     .map((p) => {
       const pattern = p.pattern ?? p;
       if (isAstNode(pattern)) {
-        return content.slice(pattern.start, pattern.end);
+        return extractParamName(pattern, content);
       }
       return "?";
     })
@@ -969,7 +981,7 @@ export function generateMap(content: string, filePath: string, totalBytes: numbe
     totalBytes,
     language: langInfo?.name ?? "Unknown",
     symbols: [],
-    imports: [],
+
   };
 
   if (!langInfo) return baseMap;

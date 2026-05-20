@@ -3,6 +3,8 @@ import type { FileMap, FileSymbol } from "./types";
 
 const BOX_LINE = "───────────────────────────────────────";
 const MAX_MAP_BYTES = 25 * 1024;
+const MAX_MAP_BYTES_COMPACT = 10 * 1024;
+const COMPACT_MAX_SYMBOLS = 30;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -134,6 +136,68 @@ function formatMinimalMap(fileMap: FileMap): string {
   lines.push(BOX_LINE);
   lines.push("Use read(path, offset=LINE, limit=N) for targeted reads.");
   lines.push(BOX_LINE);
+
+  return lines.join("\n");
+}
+
+function formatSymbolCompact(symbol: FileSymbol): string {
+  const lineRange =
+    symbol.startLine === symbol.endLine
+      ? `[${symbol.startLine}]`
+      : `[${symbol.startLine}-${symbol.endLine}]`;
+
+  let display = symbol.name;
+  if (symbol.signature && (symbol.kind === "function" || symbol.kind === "method")) {
+    display = symbol.signature.includes(symbol.name)
+      ? symbol.signature
+      : `${symbol.name}${symbol.signature}`;
+  }
+
+  const mods = symbol.modifiers?.length ? `${symbol.modifiers.join(" ")} ` : "";
+  return `${mods}${display}: ${lineRange}`;
+}
+
+export function formatFileMapCompact(fileMap: FileMap): string {
+  const header = `${fileMap.totalLines} lines │ ${formatSize(fileMap.totalBytes)} │ ${fileMap.language}`;
+  const lines: string[] = [header];
+
+  const symbols = fileMap.symbols.slice(0, COMPACT_MAX_SYMBOLS);
+  for (const symbol of symbols) {
+    lines.push(formatSymbolCompact(symbol));
+    if (symbol.children?.length) {
+      for (const child of symbol.children) {
+        lines.push(`  ${formatSymbolCompact(child)}`);
+      }
+    }
+  }
+
+  if (fileMap.symbols.length > COMPACT_MAX_SYMBOLS) {
+    lines.push(`... ${fileMap.symbols.length - COMPACT_MAX_SYMBOLS} more`);
+  }
+
+  const result = lines.join("\n");
+  if (Buffer.byteLength(result, "utf8") > MAX_MAP_BYTES_COMPACT) {
+    return formatMinimalCompact(fileMap);
+  }
+  return result;
+}
+
+function formatMinimalCompact(fileMap: FileMap): string {
+  const header = `${fileMap.totalLines} lines │ ${formatSize(fileMap.totalBytes)} │ ${fileMap.language}`;
+  const lines: string[] = [header];
+
+  const symbols = fileMap.symbols.slice(0, 20);
+  for (const symbol of symbols) {
+    const lineRange =
+      symbol.startLine === symbol.endLine
+        ? `[${symbol.startLine}]`
+        : `[${symbol.startLine}-${symbol.endLine}]`;
+    lines.push(`${symbol.name}: ${lineRange}`);
+  }
+
+  if (fileMap.symbols.length > 20) {
+    lines.push(`... ${fileMap.symbols.length - 20} more`);
+  }
 
   return lines.join("\n");
 }

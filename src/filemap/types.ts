@@ -39,5 +39,5 @@ export interface FileMap {
   totalBytes: number;
   language: string;
   symbols: FileSymbol[];
-  imports: string[];
+
 }

@@ -4,7 +4,7 @@ import { relative } from "node:path";
 import { stat } from "node:fs/promises";
 
 import { getCachedFileMap } from "../filemap/cache";
-import { formatFileMap } from "../filemap/format";
+import { formatFileMapCompact } from "../filemap/format";
 import { normalizeToLF, stripBom } from "../hashline/diff";
 import { loadFileKindAndText } from "../shared/file-kind";
 import { collectProjectFiles } from "../shared/project-files";
@@ -148,7 +148,7 @@ export function registerOutlineTool(pi: ExtensionAPI): void {
         }
 
         const displayPath = relative(ctx.cwd, filePath) || filePath;
-        const text = `Path: ${displayPath}\n${formatFileMap(fileMap).trim()}`;
+        const text = `${displayPath}\n${formatFileMapCompact(fileMap)}`;
         if (!appendWithinBudget(parts, text)) {
           outputTruncated = true;
           break;

@@ -60,7 +60,7 @@ function isFileMap(value: unknown): value is FileMap {
     return false;
   if (typeof value["language"] !== "string") return false;
   if (!Array.isArray(value["symbols"]) || !value["symbols"].every(isFileSymbol)) return false;
-  if (!isStringArray(value["imports"])) return false;
+
   return true;
 }
 
