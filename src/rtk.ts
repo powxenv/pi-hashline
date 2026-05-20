@@ -130,7 +130,9 @@ function parseRtkGainOutput(output: string): RtkGainSummary | null {
   const inputTokens = parseFirstMatch(output, /^Input tokens:\s*(.+)$/m);
   const outputTokens = parseFirstMatch(output, /^Output tokens:\s*(.+)$/m);
   const tokensSaved = parseFirstMatch(output, /^Tokens saved:\s*([^\n(]+)/m);
-  const percentSaved = parseNumberValue(parseFirstMatch(output, /^Tokens saved:\s*[^\n(]+\(([^%)]+)%\)/m));
+  const percentSaved = parseNumberValue(
+    parseFirstMatch(output, /^Tokens saved:\s*[^\n(]+\(([^%)]+)%\)/m),
+  );
   const execTimeMatch = output.match(/^Total exec time:\s*([^\n(]+)(?:\(avg\s*([^\n)]+)\))?/m);
   const totalExecTime = execTimeMatch?.[1]?.trim();
   const averageExecTime = execTimeMatch?.[2]?.trim();
@@ -207,7 +209,9 @@ function renderDetailedGain(summary: RtkGainSummary | null, ctx: ExtensionContex
     `Saved: ${summary.tokensSaved ?? "--"}`,
     `Exec time: ${summary.totalExecTime ?? "--"}  Avg: ${summary.averageExecTime ?? "--"}`,
   ];
-  return lines.map((line, index) => (index === 1 ? ctx.ui.theme.fg("success", line) : line)).join("\n");
+  return lines
+    .map((line, index) => (index === 1 ? ctx.ui.theme.fg("success", line) : line))
+    .join("\n");
 }
 
 function rtkRewriteCommand(command: string): string | undefined {
@@ -253,7 +257,7 @@ function isRtkSubcommand(value: string): value is (typeof VALID_RTK_SUBCOMMANDS)
 function handleRtkSubcommand(
   subcommand: (typeof VALID_RTK_SUBCOMMANDS)[number],
   ctx: ExtensionContext,
- ): void {
+): void {
   if (subcommand === "status") {
     showRtkStatus(ctx);
     return;

@@ -24,7 +24,7 @@ Restart Pi after installation so the replacement tools are registered.
 - Safer file edits using anchored read output
 - Anchored search results for editing matches without extra reads, with `.gitignore`, include/exclude globs, asymmetric context, and count-only mode
 - Deterministic `ls` and `.gitignore`-aware `find` for file exploration without shell noise
-- Syntax-aware `ast_search` for Bash, C, C++, CSS, Go, HTML, Java, JavaScript/JSX, Kotlin, Python, Ruby, Rust, Swift, TypeScript/TSX, and YAML, including ast-grep rule objects
+- Syntax-aware `ast_search` for Bash, C, C++, CSS, Go, HTML, Java, JavaScript/JSX, Kotlin, Python, Ruby, Rust, Swift, TypeScript/TSX, and YAML, including ast-grep rule objects and `sgconfig.yml` rule discovery
 - Write output with fresh anchors for immediate follow-up edits
 - Compact maps, symbol reads, and an `outline` tool for navigating large files without loading full contents
 - Symbol replacement for supported mapped files, with syntax-regression warnings for JS/TS edits
@@ -37,6 +37,16 @@ Restart Pi after installation so the replacement tools are registered.
 When reading large files, `pi-hashline` can add a compact outline of the file so agents can jump directly to relevant sections instead of scanning the entire file. Agents can also read or replace mapped symbols by name.
 
 Supported languages include TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, C/C++, Java, Kotlin, Swift, Shell, Clojure/EDN, SQL, JSON, Markdown, YAML, TOML, and CSV. File maps are cached in memory and persisted under the user cache directory for faster repeated reads, with automatic count/age pruning.
+
+## Structural search configs
+
+`ast_search` can run ad hoc ast-grep patterns or repository rules from `sgconfig.yml`. Use `config` to point at the project config and optionally `ruleId` to run one rule:
+
+```json
+{ "config": "sgconfig.yml", "ruleId": "no-debugger", "path": "src" }
+```
+
+Supported config fields are `ruleDirs` and `languageGlobs`. Rule files support `id`, `language`, `rule`, `constraints`, `utils`, `files`, and `ignores`. Results include hashline anchors and rule ids so follow-up edits can use the safer anchored `edit` tool.
 
 ## Bash output compaction
 
@@ -67,7 +77,7 @@ If [`rtk`](https://github.com/rtk-ai/rtk) is installed, `pi-hashline` can rewrit
 ```bash
 brew install rtk
 rtk --version
-rtk gain
+rtk gain --format json
 ```
 
 ### Linux
@@ -75,7 +85,7 @@ rtk gain
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
 rtk --version
-rtk gain
+rtk gain --format json
 ```
 
 ### Windows
@@ -86,7 +96,7 @@ Verify after installation:
 
 ```powershell
 rtk --version
-rtk gain
+rtk gain --format json
 ```
 
 ## RTK commands in Pi

@@ -13,12 +13,14 @@ import rustLang from "@ast-grep/lang-rust";
 import swiftLang from "@ast-grep/lang-swift";
 import yamlLang from "@ast-grep/lang-yaml";
 import { Type } from "typebox";
-import { extname, relative } from "node:path";
+import { dirname, extname, join, relative } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { parse as parseYaml } from "yaml";
 
 import { normalizeToLF, stripBom } from "../hashline/diff";
 import { computeLineHash } from "../hashline/engine";
 import { loadFileKindAndText } from "../shared/file-kind";
-import { collectProjectFiles } from "../shared/project-files";
+import { collectProjectFiles, matchesProjectGlob } from "../shared/project-files";
 import { resolveToCwd } from "../shared/paths";
 import { throwIfAborted } from "../shared/runtime";
 
@@ -122,6 +124,8 @@ type AstSearchParams = {
   language?: AstLanguage;
   include?: string[];
   exclude?: string[];
+  config?: string;
+  ruleId?: string;
   context: number;
   before: number;
   after: number;
@@ -132,9 +136,26 @@ type AstSearchParams = {
 
 type AstSearchMatch = {
   path: string;
+  ruleId?: string;
   startLine: number;
   endLine: number;
   textLines: string[];
+};
+
+type AstSearchConfigRule = {
+  id: string;
+  language: AstLanguage;
+  rule: Rule;
+  constraints?: Record<string, Rule>;
+  utils?: Record<string, Rule>;
+  include?: string[];
+  exclude?: string[];
+};
+
+type AstSearchConfig = {
+  baseDir: string;
+  rules: AstSearchConfigRule[];
+  languageGlobs: Map<string, AstLanguage>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -367,18 +388,147 @@ function readRule(value: unknown, path: string): Rule {
   return readRuleWithKeys(value, path, RULE_KEYS);
 }
 
+function readOptionalStringArray(value: unknown, path: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new Error(`${path} must be an array of strings.`);
+  }
+  return value;
+}
+
+function readRequiredLanguage(value: unknown, path: string): AstLanguage {
+  const languageName = readNonEmptyString(value, path);
+  const language = parseLanguage(languageName);
+  if (language === undefined) throw new Error(`${path} is required.`);
+  return language;
+}
+
+function readAstSearchConfigRule(value: unknown, path: string): AstSearchConfigRule {
+  if (!isRecord(value)) throw new Error(`${path} must be an object.`);
+  const id = readNonEmptyString(value["id"], `${path}.id`);
+  const language = readRequiredLanguage(value["language"], `${path}.language`);
+  if (value["rule"] === undefined) throw new Error(`${path}.rule is required.`);
+  return {
+    id,
+    language,
+    rule: readRule(value["rule"], `${path}.rule`),
+    constraints: readRuleRecord(value["constraints"], `${path}.constraints`),
+    utils: readRuleRecord(value["utils"], `${path}.utils`),
+    include: readOptionalStringArray(value["files"], `${path}.files`),
+    exclude: readOptionalStringArray(value["ignores"], `${path}.ignores`),
+  };
+}
+
+function readLanguageGlobs(value: unknown, path: string): Map<string, AstLanguage> {
+  const languageGlobs = new Map<string, AstLanguage>();
+  if (value === undefined) return languageGlobs;
+  if (!isRecord(value)) throw new Error(`${path} must be an object.`);
+  for (const [languageName, patterns] of Object.entries(value)) {
+    const language = readRequiredLanguage(languageName, `${path}.${languageName}`);
+    for (const pattern of readOptionalStringArray(patterns, `${path}.${languageName}`) ?? []) {
+      languageGlobs.set(pattern, language);
+    }
+  }
+  return languageGlobs;
+}
+
+async function collectYamlRuleFiles(directory: string): Promise<string[]> {
+  const directoryStat = await stat(directory);
+  if (directoryStat.isFile()) {
+    return directory.endsWith(".yml") || directory.endsWith(".yaml") ? [directory] : [];
+  }
+  if (!directoryStat.isDirectory()) return [];
+  const files: string[] = [];
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await collectYamlRuleFiles(entryPath)));
+    } else if (entry.isFile() && (entry.name.endsWith(".yml") || entry.name.endsWith(".yaml"))) {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+async function readYamlFile(filePath: string): Promise<unknown> {
+  const parsed: unknown = parseYaml(await readFile(filePath, "utf8"));
+  return parsed;
+}
+
+async function loadAstSearchConfig(params: {
+  configPath: string;
+  cwd: string;
+  ruleId: string | undefined;
+}): Promise<AstSearchConfig> {
+  const absoluteConfigPath = resolveToCwd(params.configPath, params.cwd);
+  const parsedConfig = await readYamlFile(absoluteConfigPath);
+  if (!isRecord(parsedConfig))
+    throw new Error(`ast_search config must be an object: ${params.configPath}`);
+  const ruleDirs = readOptionalStringArray(parsedConfig["ruleDirs"], "ast_search.config.ruleDirs");
+  if (ruleDirs === undefined || ruleDirs.length === 0) {
+    throw new Error("ast_search config requires a non-empty ruleDirs array.");
+  }
+  const baseDir = dirname(absoluteConfigPath);
+  const rules: AstSearchConfigRule[] = [];
+  for (const ruleDir of ruleDirs) {
+    const ruleFiles = await collectYamlRuleFiles(join(baseDir, ruleDir));
+    for (const ruleFile of ruleFiles) {
+      const parsedRule = await readYamlFile(ruleFile);
+      const rule = readAstSearchConfigRule(parsedRule, relative(params.cwd, ruleFile) || ruleFile);
+      if (params.ruleId === undefined || rule.id === params.ruleId) rules.push(rule);
+    }
+  }
+  if (rules.length === 0) {
+    throw new Error(
+      params.ruleId === undefined
+        ? `No ast-grep rules found in ${params.configPath}.`
+        : `No ast-grep rule with id ${params.ruleId} found in ${params.configPath}.`,
+    );
+  }
+  return {
+    baseDir,
+    rules,
+    languageGlobs: readLanguageGlobs(
+      parsedConfig["languageGlobs"],
+      "ast_search.config.languageGlobs",
+    ),
+  };
+}
+
 function parseParams(params: unknown): AstSearchParams {
   if (!isRecord(params)) throw new Error("ast_search params must be an object.");
+  const configInput = params["config"];
+  if (configInput !== undefined && typeof configInput !== "string") {
+    throw new Error("ast_search.config must be a non-empty string path.");
+  }
+  const ruleIdInput = params["ruleId"];
+  if (ruleIdInput !== undefined && typeof ruleIdInput !== "string") {
+    throw new Error("ast_search.ruleId must be a non-empty string.");
+  }
+  const ruleId =
+    ruleIdInput === undefined ? undefined : readNonEmptyString(ruleIdInput, "ast_search.ruleId");
+  const config =
+    configInput === undefined
+      ? ruleId === undefined
+        ? undefined
+        : "sgconfig.yml"
+      : readNonEmptyString(configInput, "ast_search.config");
   const patternInput = params["pattern"];
   const ruleInput = params["rule"];
   if (patternInput !== undefined && ruleInput !== undefined) {
     throw new Error('ast_search accepts either "pattern" or "rule", not both.');
   }
+  if (config !== undefined && (patternInput !== undefined || ruleInput !== undefined)) {
+    throw new Error('ast_search accepts either "config" or "pattern"/"rule", not both.');
+  }
   const pattern =
     patternInput === undefined ? undefined : readNonEmptyString(patternInput, "ast_search.pattern");
   const rule = ruleInput === undefined ? undefined : readRule(ruleInput, "ast_search.rule");
-  if (pattern === undefined && rule === undefined) {
-    throw new Error('ast_search requires either a non-empty "pattern" string or a "rule" object.');
+  if (config === undefined && pattern === undefined && rule === undefined) {
+    throw new Error(
+      'ast_search requires either a non-empty "pattern" string, a "rule" object, or a "config" path.',
+    );
   }
 
   const context = getInteger(params["context"], DEFAULT_CONTEXT_LINES, 0, 20);
@@ -387,6 +537,8 @@ function parseParams(params: unknown): AstSearchParams {
     ...(rule !== undefined ? { rule } : {}),
     constraints: readRuleRecord(params["constraints"], "ast_search.constraints"),
     utils: readRuleRecord(params["utils"], "ast_search.utils"),
+    config,
+    ruleId,
     path: typeof params["path"] === "string" ? params["path"] : undefined,
     language: parseLanguage(params["language"]),
     include: getStringArray(params["include"], "include"),
@@ -413,6 +565,40 @@ function detectAstLanguage(
   return null;
 }
 
+function detectConfiguredLanguage(
+  filePath: string,
+  config: AstSearchConfig | undefined,
+): AstLanguage | null {
+  if (config === undefined) return null;
+  const relativeToConfig = relative(config.baseDir, filePath).split("\\").join("/");
+  for (const [pattern, language] of config.languageGlobs.entries()) {
+    if (matchesProjectGlob(relativeToConfig, pattern)) return language;
+  }
+  return null;
+}
+
+function buildConfigMatcher(rule: AstSearchConfigRule): AstSearchMatcher {
+  return {
+    rule: rule.rule,
+    language: rule.language.parser,
+    ...(rule.constraints !== undefined ? { constraints: rule.constraints } : {}),
+    ...(rule.utils !== undefined ? { utils: rule.utils } : {}),
+  };
+}
+
+function ruleAppliesToPath(rule: AstSearchConfigRule, relativePath: string): boolean {
+  if (rule.include !== undefined && rule.include.length > 0) {
+    if (!rule.include.some((pattern) => matchesProjectGlob(relativePath, pattern))) return false;
+  }
+  if (
+    rule.exclude !== undefined &&
+    rule.exclude.some((pattern) => matchesProjectGlob(relativePath, pattern))
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function buildNapiMatcher(params: AstSearchParams, language: Lang | string): AstSearchMatcher {
   if (params.rule === undefined) {
     if (params.pattern === undefined) throw new Error("ast_search matcher is missing.");
@@ -433,12 +619,14 @@ function buildMatch(params: {
   endLine: number;
   before: number;
   after: number;
+  ruleId?: string;
 }): AstSearchMatch {
   const lines = normalizeToLF(stripBom(params.content).text).split("\n");
   const start = Math.max(1, params.startLine - params.before);
   const end = Math.min(lines.length, params.endLine + params.after);
   return {
     path: params.displayPath,
+    ...(params.ruleId !== undefined ? { ruleId: params.ruleId } : {}),
     startLine: start,
     endLine: end,
     textLines: lines.slice(start - 1, end),
@@ -466,12 +654,13 @@ function formatMatches(params: {
 
   const output: string[] = [];
   for (const match of params.matches) {
+    const ruleLabel = match.ruleId === undefined ? "" : `[${match.ruleId}] `;
     const width = String(match.endLine).length;
     for (let index = 0; index < match.textLines.length; index++) {
       const lineNumber = match.startLine + index;
       const line = match.textLines[index] ?? "";
       output.push(
-        `${match.path}:${String(lineNumber).padStart(width, " ")}#${computeLineHash(lineNumber, line)}:${line}`,
+        `${ruleLabel}${match.path}:${String(lineNumber).padStart(width, " ")}#${computeLineHash(lineNumber, line)}:${line}`,
       );
     }
     output.push("");
@@ -532,6 +721,14 @@ export async function executeAstSearch(paramsInput: {
   let unsupportedFiles = 0;
   let parseErrorFiles = 0;
   let matchLimitReached = false;
+  const astConfig =
+    params.config === undefined
+      ? undefined
+      : await loadAstSearchConfig({
+          configPath: params.config,
+          cwd: paramsInput.cwd,
+          ruleId: params.ruleId,
+        });
 
   for (const filePath of collection.files) {
     throwIfAborted(paramsInput.signal);
@@ -540,16 +737,62 @@ export async function executeAstSearch(paramsInput: {
       break;
     }
 
+    const displayPath = relative(paramsInput.cwd, filePath) || filePath;
+    const file = await loadFileKindAndText(filePath);
+    if (file.kind !== "text") continue;
+    const content = normalizeToLF(stripBom(file.text).text);
+
+    if (astConfig !== undefined) {
+      const relativeToConfig = relative(astConfig.baseDir, filePath).split("\\").join("/");
+      const language =
+        detectConfiguredLanguage(filePath, astConfig) ?? detectAstLanguage(filePath, undefined);
+      if (language === null) {
+        unsupportedFiles += 1;
+        continue;
+      }
+      const applicableRules = astConfig.rules.filter(
+        (rule) => rule.language.name === language.name && ruleAppliesToPath(rule, relativeToConfig),
+      );
+      for (const configRule of applicableRules) {
+        try {
+          const root = parse(configRule.language.parser, content);
+          const nodes = root.root().findAll(buildConfigMatcher(configRule));
+          for (const node of nodes) {
+            if (matches.length >= params.limit) {
+              matchLimitReached = true;
+              break;
+            }
+            const range = node.range();
+            matches.push(
+              buildMatch({
+                displayPath,
+                content,
+                startLine: range.start.line + 1,
+                endLine:
+                  range.end.column === 0
+                    ? Math.max(range.start.line + 1, range.end.line)
+                    : range.end.line + 1,
+                before: params.before,
+                after: params.after,
+                ruleId: configRule.id,
+              }),
+            );
+          }
+        } catch (error: unknown) {
+          if (error instanceof Error && error.message.toLowerCase().includes("pattern"))
+            throw error;
+          parseErrorFiles += 1;
+        }
+        if (matchLimitReached) break;
+      }
+      continue;
+    }
+
     const language = detectAstLanguage(filePath, params.language);
     if (language === null) {
       unsupportedFiles += 1;
       continue;
     }
-
-    const displayPath = relative(paramsInput.cwd, filePath) || filePath;
-    const file = await loadFileKindAndText(filePath);
-    if (file.kind !== "text") continue;
-    const content = normalizeToLF(stripBom(file.text).text);
 
     try {
       const root = parse(language.parser, content);
@@ -617,6 +860,7 @@ export function registerAstSearchTool(pi: ExtensionAPI): void {
       "Use ast_search when text grep is too broad and the task needs syntax-aware matches.",
       "Use grep for plain text searches and ast_search for code shape patterns such as foo($ARG).",
       "Use rule objects for kind, regex, relational, composite, constraint, or utility-rule matching.",
+      "Use project configs with config/ruleId when the repository already has sgconfig.yml rules.",
       "Set language when searching extensionless or ambiguous files.",
       "Use edit for changes after inspecting anchored matches.",
     ],
@@ -640,6 +884,15 @@ export function registerAstSearchTool(pi: ExtensionAPI): void {
         ),
         utils: Type.Optional(
           Type.Unknown({ description: "ast-grep utility rules object mapping names to rules" }),
+        ),
+        config: Type.Optional(
+          Type.String({ description: "Path to sgconfig.yml for project rule discovery" }),
+        ),
+        ruleId: Type.Optional(
+          Type.String({
+            description:
+              "Rule id to run from sgconfig.yml; defaults config to sgconfig.yml when omitted",
+          }),
         ),
         path: Type.Optional(
           Type.String({ description: "File or directory to search; defaults to cwd" }),
